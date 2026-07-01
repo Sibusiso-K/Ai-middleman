@@ -1,18 +1,21 @@
 """
-whatsapp_webhook.py — WhatsApp webhook receiver for the AI Middleman API.
+whatsapp_webhook.py — FastAPI webhook receiver for WhatsApp Business Cloud API.
 
-Handles Meta's webhook verification (GET) and incoming message events (POST).
-Each text message is processed asynchronously via background tasks: saved to
-the database, run through the two-stage matching pipeline, and replied to
-via the WhatsApp Business Cloud API.
+Handles:
+- GET /webhook/whatsapp: Meta verification handshake
+- POST /webhook/whatsapp: Incoming message processing
 
-Exposed: FastAPI APIRouter with GET and POST /webhook/whatsapp endpoints.
+Privacy layer: replies never reveal personal contact details.
+Contact selection (1-5) triggers an introduction request logged for middleman approval.
+
+Pipeline: receive → save → match → format → reply
 """
 
 from fastapi import APIRouter, Request, HTTPException, Query, BackgroundTasks
 import hashlib
 import hmac
 import os
+import json
 import logging
 from dotenv import load_dotenv
 from pathlib import Path
@@ -68,7 +71,6 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
     # Signature check — log warning but don't block (temporarily relaxed for debugging)
     if APP_SECRET and not verify_signature(payload, signature):
         logger.warning("Invalid webhook signature — allowing through for debugging")
-        # raise HTTPException(status_code=401, detail="Invalid signature")
 
     data = await request.json()
 
@@ -97,23 +99,39 @@ async def process_message(db_pool, value: dict):
             return
 
         sender = message["from"]
-        text = message["text"]["body"]
+        text = message["text"]["body"].strip()
 
-        print(f"[DEBUG] Sender number from webhook payload: {sender}")
         logger.info(f"Message from {sender}: {text}")
 
-        # Save inbound message
+        # Save inbound message and get its ID
         async with db_pool.acquire() as conn:
-            await conn.execute(
-                "INSERT INTO messages (sender_number, message_text) VALUES ($1, $2)",
+            msg_row = await conn.fetchrow(
+                "INSERT INTO messages (sender_number, message_text) VALUES ($1, $2) RETURNING id",
                 sender, text
             )
+            message_id = msg_row['id']
 
-        # Run through matching pipeline
+        # Check if user is selecting a contact (replies 1-5)
+        if text in ['1', '2', '3', '4', '5']:
+            await handle_contact_selection(db_pool, sender, text, message_id)
+            return
+
+        # Run full matching pipeline
         engine = MatchingEngine(db_pool)
         result = await engine.match(text)
 
-        # Send reply
+        # Save conversation state so we remember what was shown
+        async with db_pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO conversation_state (sender_number, last_matches, last_query, updated_at)
+                VALUES ($1, $2::jsonb, $3, CURRENT_TIMESTAMP)
+                ON CONFLICT (sender_number) DO UPDATE
+                SET last_matches = $2::jsonb,
+                    last_query = $3,
+                    updated_at = CURRENT_TIMESTAMP
+            """, sender, json.dumps(result['matches']), text)
+
+        # Send privacy-safe reply
         whatsapp_client = WhatsAppClient()
         await whatsapp_client.send_message(to=sender, text=result["formatted_response"])
 
@@ -121,3 +139,59 @@ async def process_message(db_pool, value: dict):
 
     except Exception as e:
         logger.error(f"Background task error: {e}", exc_info=True)
+
+
+async def handle_contact_selection(db_pool, sender: str, selection: str, message_id: int):
+    """User replied with 1-5 to select a contact. Log introduction request for approval."""
+    whatsapp_client = WhatsAppClient()
+
+    async with db_pool.acquire() as conn:
+        state = await conn.fetchrow(
+            "SELECT last_matches, last_query FROM conversation_state WHERE sender_number = $1",
+            sender
+        )
+
+    if not state or not state['last_matches']:
+        await whatsapp_client.send_message(
+            to=sender,
+            text="I don't have any recent matches on file. Please send a new search request."
+        )
+        return
+
+    matches = state['last_matches']
+    # Handle both string (JSON) and already-parsed dict/list
+    if isinstance(matches, str):
+        matches = json.loads(matches)
+
+    idx = int(selection) - 1
+
+    if idx >= len(matches):
+        await whatsapp_client.send_message(
+            to=sender,
+            text=f"Please reply with a number between 1 and {len(matches)}."
+        )
+        return
+
+    selected = matches[idx]
+    contact_id = selected.get('contact_id')
+
+    # Log the introduction request
+    async with db_pool.acquire() as conn:
+        req = await conn.fetchrow("""
+            INSERT INTO introduction_requests
+            (message_id, requester_number, contact_id, status)
+            VALUES ($1, $2, $3, 'pending')
+            RETURNING id
+        """, message_id, sender, contact_id)
+        request_id = req['id']
+
+    # Confirm to user — no personal details
+    confirmation = (
+        f"✅ *Introduction Request Received*\n\n"
+        f"Reference: *REQ-{request_id:04d}*\n"
+        f"Contact: *C-{contact_id}*\n\n"
+        f"The middleman will review your request and be in touch shortly.\n\n"
+        f"_Typical response time: within 24 hours_"
+    )
+    await whatsapp_client.send_message(to=sender, text=confirmation)
+    logger.info(f"Introduction request REQ-{request_id:04d} logged: sender={sender}, contact={contact_id}")
