@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Environment variables — NEVER commit these
+.env
+
+# Database
+*.sql.bak
+pgdata/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Docker volumes
+ollama/
+
+# Data files — too large for git
+data/contacts.csv
+contacts.csv
+contacts_sample.xlsx
+
+# Reports (optional — remove if you want reports in git)
+# reports/
+
+# ngrok
+.ngrok/
+
+# Test scripts (temporary)
+test_query.py
+
+# Temp files
+~$*
+
+# Large binaries
+*.pdf

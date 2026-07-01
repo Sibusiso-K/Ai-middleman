@@ -1,0 +1,848 @@
+\documentclass[12pt, a4paper]{report}
+
+% Packages
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\usepackage{titlesec}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{tcolorbox}
+\usepackage{tikz}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{fancyhdr}
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{float}
+
+% Geometry setup
+\geometry{margin=1in, headheight=15pt}
+
+% Custom colors
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+\definecolor{primaryblue}{RGB}{0, 102, 204}
+\definecolor{secondarygreen}{RGB}{0, 153, 76}
+\definecolor{accentorange}{RGB}{255, 153, 0}
+
+% Code listing style
+\lstset{
+    backgroundcolor=\color{backcolour},
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,
+    breaklines=true,
+    captionpos=b,
+    keepspaces=true,
+    numbers=left,
+    numbersep=5pt,
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    tabsize=4,
+    frame=single,
+    language=Python
+}
+
+% Hyperref setup
+\hypersetup{
+    colorlinks=true,
+    linkcolor=primaryblue,
+    filecolor=magenta,      
+    urlcolor=primaryblue,
+    citecolor=secondarygreen,
+}
+
+% Section formatting
+\titleformat{\chapter}[display]
+  {\normalfont\huge\bfseries\color{primaryblue}}
+  {\chaptertitlename\ \thechapter}{20pt}{\Huge}
+\titleformat{\section}
+  {\normalfont\Large\bfseries\color{primaryblue}}
+  {\thesection}{10pt}{}
+\titleformat{\subsection}
+  {\normalfont\large\bfseries\color{secondarygreen}}
+  {\thesubsection}{10pt}{}
+
+% Custom commands
+\newcommand{\techstack}[1]{\texttt{#1}}
+\newcommand{\cost}[1]{\textbf{\color{secondarygreen}$#1}}
+\newcommand{\warning}[1]{\textbf{\color{red}#1}}
+\newcommand{\note}[1]{\begin{tcolorbox}[colback=blue!5!white,colframe=blue!75!black,title=Note]#1\end{tcolorbox}}
+\newcommand{\important}[1]{\begin{tcolorbox}[colback=red!5!white,colframe=red!75!black,title=Important]#1\end{tcolorbox}}
+
+% Title information
+\title{\textbf{\Huge AI Middleman Contact Matching System}\\[1em]
+\Large Comprehensive Technical Plan}
+\author{System Architecture Document}
+\date{\today}
+
+\begin{document}
+
+% Title Page
+\begin{titlepage}
+    \centering
+    \vspace*{2cm}
+    
+    {\Huge\bfseries\color{primaryblue}AI Middleman}\\[0.5em]
+    {\LARGE\bfseries Contact Matching System}\\[2cm]
+    
+    {\large Comprehensive Technical Plan}\\[1cm]
+    
+    \vspace{1cm}
+    
+    \begin{tabular}{|l|l|}
+        \hline
+        \textbf{Document Version} & 2.0 \\
+        \hline
+        \textbf{Date} & \today \\
+        \hline
+        \textbf{Status} & Planning Phase \\
+        \hline
+    \end{tabular}
+    
+    \vfill
+    
+    {\large\itshape "Automating Business Connections through Intelligent Matching"}
+    
+    \vspace{2cm}
+\end{titlepage}
+
+% Table of Contents
+\tableofcontents
+\newpage
+
+% Chapter 1: Executive Summary
+\chapter{Executive Summary}
+
+\section{Project Overview}
+
+This document presents a comprehensive technical plan for building a simplified, high-efficiency \textbf{AI-powered contact matching system} designed for a business middleman who maintains a network of 200--400 professional contacts. The system automates the process of matching incoming connection requests (received via WhatsApp) with appropriate contacts from the middleman's database using a streamlined agentic approach.
+
+\section{Key Requirements}
+
+\begin{itemize}
+    \item \textbf{Contact Database:} 200--400 contacts with fields for name, contact number, email, role, company, context, and LinkedIn URL
+    \item \textbf{Message Volume:} 50--250 WhatsApp messages per day requiring contact matching
+    \item \textbf{Budget:} Free to low-cost (\cost{< \$5/month})
+    \item \textbf{Latency:} Near real-time (< 3--5 seconds)
+    \item \textbf{Deployment:} Free VPS or cloud infrastructure (Oracle Cloud Free Tier)
+    \item \textbf{Primary Interface:} Mobile WhatsApp, with optional PC dashboard support
+\end{itemize}
+
+\section{Recommended Approach: Simple Agentic AI Architecture}
+
+After analyzing several architectures and taking into account the small contact database size (200--400 entries), we recommend a \textbf{Simple Agentic AI Architecture} consisting of:
+
+\begin{enumerate}
+    \item \textbf{Stage 1: Keyword Filtering} to run locally and instantly, pruning the 400 contacts down to 30--50 potential candidates. This is completely free and eliminates the overhead and complexity of managing vector embeddings and local sentence transformer models.
+    \item \textbf{Stage 2: LLM Agent Evaluation} via OpenRouter's free tier (Llama 3.1 8B) or a local Ollama fallback. The agent processes the 30--50 candidates within a single prompt, assessing suitability and outputting structured JSON containing confidence scores (0.0--1.0) and match reasoning.
+    \item \textbf{No-Match Handling \& Clarification:} If the best match confidence is low (< 0.4), the system prompts the agent to ask clarifying questions back to the user on WhatsApp to gather additional requirements.
+\end{enumerate}
+
+This approach provides high accuracy, low latency, and absolute simplicity with minimal hosting requirements.
+
+\section{Key Metrics}
+
+\begin{center}
+\begin{tabular}{|l|l|}
+\hline
+\textbf{Metric} & \textbf{Target} \\
+\hline
+Monthly Operating Cost & \cost{\$0-5} \\
+\hline
+Response Latency & 2--3 seconds \\
+\hline
+Match Accuracy & High \\
+\hline
+System Uptime & > 99\% \\
+\hline
+\end{tabular}
+\end{center}
+
+% Chapter 2: System Architecture
+\chapter{System Architecture}
+
+\section{High-Level Architecture}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+    node distance=1.5cm and 1.5cm,
+    box/.style={rectangle, draw, rounded corners, minimum width=2.5cm, minimum height=1.0cm, text centered, font=\small, fill=blue!10},
+    db/.style={rectangle, draw, rounded corners, minimum width=2.5cm, minimum height=1.2cm, font=\small, fill=green!10},
+    arrow/.style={->, >=stealth, thick}
+]
+    % WhatsApp
+    \node[box, fill=green!20] (whatsapp) {WhatsApp\\Business API};
+    
+    % Webhook
+    \node[box, right=of whatsapp] (webhook) {Webhook\\Receiver};
+    
+    % Message Processor
+    \node[box, right=of webhook] (processor) {Message\\Processor};
+    
+    % Stage 1: Keyword Filter
+    \node[box, fill=orange!10, below=of processor] (keyword) {Stage 1: Keyword\\Filter (30-50 cand.)};
+    
+    % Database
+    \node[db, left=of keyword] (database) {PostgreSQL\\Database};
+    
+    % Stage 2: LLM Agent
+    \node[box, fill=orange!20, below=of keyword] (agent) {Stage 2: LLM Agent\\(OpenRouter Llama)};
+    
+    % Response Formatter
+    \node[box, fill=purple!15, left=of agent] (formatter) {Response\\Formatter};
+    
+    % Arrows
+    \draw[arrow] (whatsapp) -- (webhook);
+    \draw[arrow] (webhook) -- (processor);
+    \draw[arrow] (processor) -- (keyword);
+    \draw[arrow] (database) -- (keyword);
+    \draw[arrow] (keyword) -- (agent);
+    \draw[arrow] (agent) -- (formatter);
+    \draw[arrow] (formatter) -- (database);
+    \draw[arrow] (formatter) |- (whatsapp);
+\end{tikzpicture}
+\caption{High-Level System Architecture}
+\label{fig:architecture}
+\end{figure}
+
+\section{Component Description}
+
+\subsection{WhatsApp Business API Integration}
+The system receives incoming messages through Meta's WhatsApp Business Cloud API via webhooks. This is the official, legal method for programmatic WhatsApp access.
+
+\subsection{Webhook Receiver (FastAPI)}
+A Python FastAPI server that:
+\begin{itemize}
+    \item Receives webhook payloads from WhatsApp
+    \item Validates message authenticity
+    \item Routes messages to the processing pipeline
+    \item Returns generated matches or clarifying questions to users
+\end{itemize}
+
+\subsection{Message Processor}
+Processes incoming messages by:
+\begin{itemize}
+    \item Parsing query text and extracting search tokens
+    \item Saving raw inbound messages to the database
+    \item Initiating the matching pipeline
+\end{itemize}
+
+\subsection{Matching Engine (Two-Stage Pipeline)}
+The core logic of the system, simplified down to two stages to accommodate the small size of the database:
+\begin{enumerate}
+    \item \textbf{Stage 1: Keyword Filter:} A fast, local keyword filter queries the PostgreSQL database using tokens extracted from the request. It filters down the 400 contacts to approximately 30--50 candidates.
+    \item \textbf{Stage 2: LLM Agent:} The candidate details are compiled into a prompt sent to Llama 3.1 8B (via OpenRouter free tier). The LLM acts as an agent, evaluating candidates, computing confidence scores, generating match reasoning, and outputting a structured JSON document.
+\end{enumerate}
+
+\subsection{Database (PostgreSQL)}
+A relational database storing contact records, message history, match history, and agent reasoning. Unlike the hybrid plan, a vector index (\techstack{pgvector}) is not required, minimizing setup effort and system resources.
+
+\subsection{Response Formatter \& Decision Branch}
+Takes the structured output from the LLM agent and applies the decision rules:
+\begin{itemize}
+    \item \textbf{Good Match (Confidence > 0.7):} Returns the top 3--5 matches with details and reasoning.
+    \item \textbf{Weak Match (Confidence 0.4--0.7):} Returns matches with a caveat indicating a partial/weak match.
+    \item \textbf{No Match (Confidence < 0.4):} Asks a clarifying question to the WhatsApp user (e.g., "Found consultants in Johannesburg - would that work?").
+\end{itemize}
+
+% Chapter 3: Approach Comparison
+\chapter{Approach Comparison}
+
+\section{Comparison of Architectures}
+
+For a database of 200--400 contacts, we compared the original five-stage Hybrid approach with the newly adopted two-stage Agentic AI approach.
+
+\begin{table}[H]
+\centering
+\renewcommand{\arraystretch}{1.5}
+\begin{tabular}{|l|c|c|}
+\hline
+\textbf{Criteria} & \textbf{Hybrid Architecture} & \textbf{Agentic AI Architecture (Selected)} \\
+\hline
+\textbf{Cost/Month} & \cost{\$2-9} & \cost{\$0-5} \\
+\hline
+\textbf{Latency} & 1--3 seconds & 2--3 seconds \\
+\hline
+\textbf{Accuracy} & High & \textbf{High} \\
+\hline
+\textbf{Embeddings Required} & Yes (pgvector, local BGE) & \textbf{No} \\
+\hline
+\textbf{Vector Search} & Core component & \textbf{Removed} \\
+\hline
+\textbf{LLM Input Candidates} & Top 10 (pre-filtered by cross-encoder) & Top 30--50 (pre-filtered by keywords) \\
+\hline
+\textbf{LLM Provider} & Groq API & OpenRouter Free Tier (Llama 3.1 8B) \\
+\hline
+\textbf{Local Fallback} & Cross-encoder only (degraded) & Ollama local models \\
+\hline
+\textbf{Complexity} & Medium-High (Multiple ML models) & \textbf{Low (Simple Python + API)} \\
+\hline
+\end{tabular}
+\caption{Comparison Matrix: Hybrid vs. Agentic AI}
+\label{tab:comparison}
+\end{table}
+
+\section{Why the Simple Agentic AI Approach Wins}
+
+The transition from the Hybrid model to a simpler Agentic AI approach is driven by the following factors:
+
+\begin{itemize}
+    \item \textbf{No Embedding Management:} We do not need to generate, store, index, or update embedding vectors, which completely eliminates the dependency on \techstack{pgvector} and local embedding/cross-encoder inference pipelines.
+    \item \textbf{Low Resource Footprint:} Running SentenceTransformers and Cross-Encoders locally on a free-tier VPS (like Oracle Cloud AMD or low-memory ARM instances) can lead to memory pressure and instance termination. The Agentic AI approach offloads reasoning to an external API (OpenRouter) and uses a simple, fast keyword filter locally.
+    \item \textbf{Flexible and Context-Rich LLM Context:} With a total database size of 200--400 contacts, a keyword filter can prune the list to 30--50 potential candidates. Modern LLMs like Llama 3.1 8B have a large context window (128k tokens) and can easily analyze 30--50 candidates along with their full database context in a single prompt.
+    \item \textbf{Handling of Ambiguity (Clarifications):} By using a dedicated LLM Agent in Stage 2, the system can dynamically formulate clarifying questions when matching confidence is low, rather than silently failing or returning irrelevant results.
+\end{itemize}
+
+% Chapter 4: Detailed Component Design
+\chapter{Detailed Component Design}
+\label{ch:component_design}
+
+\section{WhatsApp Integration}
+
+\subsection{WhatsApp Business Cloud API}
+
+\begin{tcolorbox}[colback=green!5!white,colframe=green!75!black,title=WhatsApp API Details]
+\textbf{Free Tier:} 1,000 conversation sessions/month\\
+\textbf{Cost After Free:} \cost{\$0.005}/conversation\\
+\textbf{Estimated Monthly Cost:} \cost{\$1-3} (for 50--250 messages/day)
+\end{tcolorbox}
+
+\subsection{Webhook Configuration}
+
+\begin{lstlisting}[language=JSON, caption=Webhook Payload Structure]
+{
+    "object": "whatsapp_business_account",
+    "entry": [{
+        "id": "WHATSAPP_BUSINESS_ACCOUNT_ID",
+        "changes": [{
+            "value": {
+                "messaging_product": "whatsapp",
+                "metadata": {
+                    "phone_number_id": "PHONE_NUMBER_ID",
+                    "display_phone_number": "+1234567890"
+                },
+                "contacts": [...],
+                "messages": [{
+                    "id": "MESSAGE_ID",
+                    "from": "SENDER_NUMBER",
+                    "timestamp": "1234567890",
+                    "type": "text",
+                    "text": {
+                        "body": "Looking for a marketing consultant in Johannesburg"
+                    }
+                }]
+            },
+            "field": "messages"
+        }]
+    }]
+}
+\end{lstlisting}
+
+\subsection{Webhook Receiver Implementation}
+
+\begin{lstlisting}[language=Python, caption=FastAPI Webhook Receiver]
+from fastapi import FastAPI, Request, HTTPException
+import hashlib, hmac
+import os
+
+app = FastAPI()
+APP_SECRET = os.getenv("WHATSAPP_APP_SECRET")
+
+def verify_signature(payload: bytes, signature: str) -> bool:
+    expected = "sha256=" + hmac.new(
+        APP_SECRET.encode(), payload, hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(expected, signature)
+
+@app.post("/webhook/whatsapp")
+async def whatsapp_webhook(request: Request):
+    payload = await request.body()
+    signature = request.headers.get("X-Hub-Signature-256", "")
+    if not verify_signature(payload, signature):
+        raise HTTPException(status_code=401, detail="Invalid signature")
+    
+    data = await request.json()
+    if data.get("object") != "whatsapp_business_account":
+        return {"status": "ignored"}
+    
+    for entry in data["entry"]:
+        for change in entry["changes"]:
+            if change["field"] == "messages":
+                await process_message(change["value"])
+    
+    return {"status": "received"}
+
+async def process_message(value: dict):
+    messages = value.get("messages", [])
+    if not messages:
+        return
+    
+    message = messages[0]
+    if message.get("type") != "text":
+        return
+    
+    sender = message["from"]
+    text = message["text"]["body"]
+    
+    # Process through matching pipeline (Stage 1 & 2)
+    matches_response = await matching_engine.match_contact(text)
+    
+    # Format response and send back via WhatsApp
+    response_text = format_response(matches_response)
+    await whatsapp_client.send_message(
+        to=sender,
+        text=response_text
+    )
+\end{lstlisting}
+
+\section{Matching Engine Design}
+
+\subsection{Stage 1: Keyword Filter}
+
+The local keyword filter matches query tokens against multiple fields (\texttt{name}, \texttt{role}, \texttt{company}, \texttt{context}) in the database. This acts as a coarse filter to prune the database of 400 contacts down to a candidate set of 30--50 relevant contacts.
+
+\begin{lstlisting}[language=Python, caption=Keyword Filter Implementation]
+import re
+from typing import List, Dict
+
+class KeywordFilter:
+    def __init__(self, db_pool):
+        self.db_pool = db_pool
+    
+    async def filter_candidates(self, query: str) -> List[Dict]:
+        # Extract alphanumeric search tokens of length 3 or more
+        tokens = [t.lower() for t in re.findall(r'\b\w{3,}\b', query)]
+        if not tokens:
+            return []
+        
+        # Build SQL pattern matches using a regular expression union
+        regex_pattern = "|".join(tokens)
+        
+        query_sql = """
+            SELECT id, name, role, company, context, contact_number, email, linkedin_url
+            FROM contacts
+            WHERE LOWER(name) ~ $1 
+               OR LOWER(role) ~ $1 
+               OR LOWER(company) ~ $1 
+               OR LOWER(context) ~ $1
+            LIMIT 50
+        """
+        
+        async with self.db_pool.acquire() as conn:
+            results = await conn.fetch(query_sql, regex_pattern)
+            
+        return [dict(row) for row in results]
+\end{lstlisting}
+
+\subsection{Stage 2: LLM Agent}
+
+The LLM Agent evaluates the query against the 30--50 filtered candidates. The agent runs on Llama 3.1 8B via OpenRouter's free tier. 
+
+\begin{lstlisting}[language=Python, caption=LLM Agent Implementation (OpenRouter)]
+import httpx
+import os
+import json
+from typing import Dict, Any
+
+class LLMAgent:
+    def __init__(self):
+        self.api_key = os.getenv("OPENROUTER_API_KEY")
+        self.api_url = "https://openrouter.ai/api/v1/chat/completions"
+        self.model = "meta-llama/llama-3.1-8b-instruct:free"
+        self.ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
+
+    async def evaluate_matches(self, query: str, candidates: list) -> Dict[str, Any]:
+        if not candidates:
+            return {
+                "analysis": "No candidates to evaluate",
+                "matches": [],
+                "match_quality": "none",
+                "clarification_question": "I couldn't find any relevant contacts. Could you tell me more about who you are looking for?"
+            }
+            
+        prompt = self._build_prompt(query, candidates)
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    self.api_url,
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "HTTP-Referer": "https://aimiddleman.org",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "model": self.model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "response_format": {"type": "json_object"},
+                        "temperature": 0.1
+                    },
+                    timeout=15.0
+                )
+            
+            if response.status_code == 200:
+                result = response.json()
+                content = result['choices'][0]['message']['content']
+                return json.loads(content)
+            else:
+                raise httpx.HTTPStatusError("API Error", request=response.request, response=response)
+                
+        except Exception:
+            # Fallback to local Ollama instance if OpenRouter rate limits or fails
+            return await self._fallback_ollama(prompt)
+
+    async def _fallback_ollama(self, prompt: str) -> Dict[str, Any]:
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    self.ollama_url,
+                    json={
+                        "model": "llama3.1:8b",
+                        "prompt": prompt + "\nRespond with raw JSON only matching the schema.",
+                        "format": "json",
+                        "stream": False
+                    },
+                    timeout=20.0
+                )
+                if response.status_code == 200:
+                    return json.loads(response.json()["response"])
+        except Exception:
+            pass
+            
+        # Emergency hard fallback
+        return {
+            "analysis": "LLM failed completely",
+            "matches": [],
+            "match_quality": "none",
+            "clarification_question": "Sorry, I am experiencing temporary system difficulties. Please try again soon."
+        }
+
+    def _build_prompt(self, query: str, candidates: list) -> str:
+        candidate_list = "\n".join(
+            f"ID: {c['id']} | Name: {c['name']} | Role: {c['role']} | Company: {c.get('company','')} | Context: {c.get('context','')}"
+            for c in candidates
+        )
+        return f"""Evaluate these candidates for the query: "{query}"
+        
+Candidates:
+{candidate_list}
+
+Respond ONLY with a JSON object following this exact schema:
+{{
+  "analysis": "Brief analysis of query requirements",
+  "matches": [
+    {{
+      "contact_id": 123,
+      "name": "Candidate Name",
+      "role": "Role Title",
+      "confidence": 0.85,
+      "reasoning": "Detailed reason why this contact fits this query"
+    }}
+  ],
+  "match_quality": "good" | "weak" | "none",
+  "clarification_question": "Optional question if confidence is low"
+}}"""
+\end{lstlisting}
+
+\subsection{Agent Output Format}
+
+The agent outputs a structured JSON document representing its evaluation:
+
+\begin{lstlisting}[language=JSON, caption=Agent Output JSON Schema]
+{
+  "analysis": "Brief analysis of what user needs",
+  "matches": [
+    {
+      "contact_id": 123,
+      "name": "John Smith",
+      "role": "Marketing Consultant",
+      "confidence": 0.85,
+      "reasoning": "Why this is a good match..."
+    }
+  ],
+  "match_quality": "good" | "weak" | "none",
+  "clarification_question": "Optional question if needed"
+}
+\end{lstlisting}
+
+\subsection{Response Formatter & Decision Branch}
+
+The output is processed by the application routing code to determine the formatting of the WhatsApp message.
+
+\begin{lstlisting}[language=Python, caption=Response Formatter Implementation]
+from typing import Dict, Any
+
+def format_response(agent_output: Dict[str, Any]) -> str:
+    quality = agent_output.get("match_quality", "none")
+    matches = agent_output.get("matches", [])
+    clarification = agent_output.get("clarification_question", "")
+    
+    if quality == "good" and matches:
+        text = "Here are the top matches I found:\n\n"
+        for idx, m in enumerate(matches[:5]):
+            text += f"{idx+1}. *{m['name']}*\n"
+            text += f"   Role: {m['role']}\n"
+            text += f"   Reasoning: {m['reasoning']}\n\n"
+        return text.strip()
+        
+    elif quality == "weak" and matches:
+        text = "⚠️ *Please note*: I found some partial matches that might fit, but they may not meet all criteria:\n\n"
+        for idx, m in enumerate(matches[:3]):
+            text += f"{idx+1}. *{m['name']}* ({m['role']})\n"
+            text += f"   Reasoning: {m['reasoning']}\n\n"
+        return text.strip()
+        
+    else:
+        if clarification:
+            return clarification
+        return "I could not find any contacts matching your request. Could you please specify more details or keywords?"
+\end{lstlisting}
+
+% Chapter 5: Database Design
+\chapter{Database Design}
+
+\section{Schema Overview}
+
+The database is built on standard PostgreSQL. Since the contact network is small (200--400 entries), we do not need embedding vectors or specialized index extensions like \techstack{pgvector}. Relational indexing is applied to query performance fields.
+
+\begin{lstlisting}[language=SQL, caption=Database Schema]
+-- Contacts table
+CREATE TABLE contacts (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    contact_number VARCHAR(20),
+    email VARCHAR(255),
+    role VARCHAR(255),
+    company VARCHAR(255),
+    context TEXT,
+    linkedin_url VARCHAR(500),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Messages table
+CREATE TABLE messages (
+    id SERIAL PRIMARY KEY,
+    sender_number VARCHAR(20) NOT NULL,
+    message_text TEXT NOT NULL,
+    received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    processed BOOLEAN DEFAULT FALSE
+);
+
+-- Match history table
+CREATE TABLE match_history (
+    id SERIAL PRIMARY KEY,
+    message_id INTEGER REFERENCES messages(id),
+    contact_id INTEGER REFERENCES contacts(id),
+    rank_position INTEGER NOT NULL,
+    confidence FLOAT NOT NULL,
+    reasoning TEXT,
+    feedback VARCHAR(20),  -- 'accepted', 'rejected', 'pending'
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Indexes for performance
+CREATE INDEX idx_contacts_name ON contacts(name);
+CREATE INDEX idx_contacts_role ON contacts(role);
+CREATE INDEX idx_messages_sender ON messages(sender_number);
+\end{lstlisting}
+
+% Chapter 6: Cost Analysis
+\chapter{Cost Analysis}
+
+\section{Monthly Cost Breakdown}
+
+\begin{table}[H]
+\centering
+\renewcommand{\arraystretch}{1.4}
+\begin{tabular}{|l|c|l|}
+\hline
+\textbf{Component} & \textbf{Cost/Month} & \textbf{Notes} \\
+\hline
+WhatsApp Business API & \cost{\$1-3} & 50--250 msg/day \\
+\hline
+LLM API (OpenRouter) & \cost{\$0} & Free Tier (Llama 3.1 8B) \\
+\hline
+VPS Hosting & \cost{\$0} & Oracle Cloud Free \\
+\hline
+PostgreSQL & \cost{\$0} & Self-hosted on VPS \\
+\hline
+Embedding / Cross-Encoder & \cost{\$0} & Not required \\
+\hline
+Domain + SSL & \cost{\$1} & Cheap domain \\
+\hline
+\textbf{Total} & \cost{\$1-4} & \textbf{Within budget} \\
+\hline
+\end{tabular}
+\caption{Monthly Cost Breakdown}
+\label{tab:costs}
+\end{table}
+
+\section{Free Tier Utilization}
+
+\begin{itemize}
+    \item \textbf{Oracle Cloud Free Tier:} 2 AMD VMs or ARM VMs (always free)
+    \item \textbf{OpenRouter Free Tier:} Meta Llama 3.1 8B Instruct Free, providing rapid, cost-free evaluations
+    \item \textbf{Ollama Local Fallback:} Self-hosted model on the VPS running local Llama 3.1 8B to recover from API failures or rate limits
+    \item \textbf{PostgreSQL:} Standard open-source DB running locally on the VPS
+\end{itemize}
+
+% Chapter 7: Deployment Plan & Project Structure
+\chapter{Deployment \& Project Structure}
+
+\section{Project Structure}
+
+The repository is structured to separate concern areas:
+
+\begin{lstlisting}[caption=Project Directory Structure]
+ai-middleman/
+├── app/
+│   ├── main.py              # FastAPI entrypoint
+│   ├── database.py          # PostgreSQL connection
+│   ├── models/              # Pydantic models
+│   ├── routes/              # WhatsApp webhook, health
+│   └── services/
+│       ├── keyword_filter.py    # Stage 1: Local filter
+│       ├── agent.py             # Stage 2: LLM Agent
+│       ├── whatsapp_client.py   # Meta WhatsApp client
+│       └── response_formatter.py # Decision branch formatter
+├── tests/
+├── migrations/
+├── data/
+└── docker-compose.yml
+\end{lstlisting}
+
+\section{Docker Compose Configuration}
+
+The Docker setup builds the API server, spins up the database, and hosts a local Ollama instance for LLM fallback capability.
+
+\begin{lstlisting}[language=bash, caption=docker-compose.yml]
+version: '3.8'
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: aimiddleman
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+  
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://postgres:${DB_PASSWORD}@db:5432/aimiddleman
+      WHATSAPP_APP_SECRET: ${WHATSAPP_APP_SECRET}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      OLLAMA_URL: http://ollama:11434/api/generate
+    depends_on:
+      - db
+      - ollama
+  
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama:/root/.ollama
+
+volumes:
+  pgdata:
+  ollama:
+\end{lstlisting}
+
+% Chapter 8: Implementation Roadmap
+\chapter{Implementation Roadmap}
+
+\section{Phase 1: Foundation (Day 1-2)}
+
+\begin{itemize}
+    \item Set up VPS and Docker environment
+    \item Configure PostgreSQL database and create tables
+    \item Implement basic FastAPI webhook receiver structures
+    \item Build CSV data importer to load contact records
+\end{itemize}
+
+\section{Phase 2: Matching Engine (Day 3-4)}
+
+\begin{itemize}
+    \item Implement local token-based \techstack{KeywordFilter} (Stage 1)
+    \item Build the \techstack{LLMAgent} prompt logic and integrate OpenRouter completions (Stage 2)
+    \item Integrate local Ollama Llama 3.1 8B fallback path to catch rate limit exceptions
+    \item Run unit and regression tests on search queries
+\end{itemize}
+
+\section{Phase 3: WhatsApp Integration (Day 5)}
+
+\begin{itemize}
+    \item Build Meta WhatsApp API client integration
+    \item Implement \techstack{ResponseFormatter} for decision branching (good match, weak match, clarify)
+    \item Complete end-to-end webhook receiver loops and verify WhatsApp replies
+\end{itemize}
+
+\section{Phase 4: Testing \& Polish (Day 6-7)}
+
+\begin{itemize}
+    \item Configure automated Caddy proxy with SSL certificate
+    \item Set up monitoring logging systems
+    \item Verify system resilience under artificial rate limit conditions
+    \item Perform load and latency verification tests
+\end{itemize}
+
+% Chapter 9: Risk Assessment
+\chapter{Risk Assessment}
+
+\begin{table}[H]
+\centering
+\renewcommand{\arraystretch}{1.4}
+\begin{tabular}{|l|c|l|}
+\hline
+\textbf{Risk} & \textbf{Impact} & \textbf{Mitigation} \\
+\hline
+WhatsApp API pricing shifts & High & Monitor conversation boundaries, restrict matching requests \\
+\hline
+OpenRouter rate limiting & Medium & Auto-fallback to local Ollama Llama 3.1 8B model \\
+\hline
+VPS downtime (Oracle) & Medium & Maintain current db backups; design fallback deploy (Fly.io/Render) \\
+\hline
+Clarification loops & Low & Set prompt rules instructing agent to limit questions \\
+\hline
+LLM schema failure & Low & Strict JSON parsing with try/except fallback blocks \\
+\hline
+\end{tabular}
+\caption{Risk Assessment Matrix}
+\end{table}
+
+% Chapter 10: Conclusion
+\chapter{Conclusion}
+
+The two-stage Agentic AI architecture presents a highly cost-effective, straightforward, and performant implementation for a contact database of 200--400 professional profiles. By utilizing a simple keyword filtering stage before invoking Llama 3.1 8B via OpenRouter, the system achieves near real-time response times while operating on a minimal monthly budget (\cost{< \$5/month}).
+
+The implementation removes pgvector indexing and embedding model layers, saving memory and CPU resources, while retaining high accuracy and conversational fallback capabilities to ensure excellent user experience.
+
+\begin{tcolorbox}[colback=green!5!white,colframe=green!75!black,title=Next Steps]
+\begin{enumerate}
+    \item Obtain OpenRouter API key and register WhatsApp Business API account
+    \item Provision Oracle Cloud VPS instance
+    \item Set up repository according to the planned project structure
+    \item Begin Phase 1 (Foundation - DB Setup and CSV Imports)
+\end{enumerate}
+\end{tcolorbox}
+
+\end{document}
