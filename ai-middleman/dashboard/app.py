@@ -31,6 +31,56 @@ load_dotenv(env_path)
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:yourpassword@localhost:5432/aimiddleman")
 API_URL = "http://localhost:8000"
 
+# WhatsApp API config for sending notifications from dashboard
+WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "")
+WHATSAPP_ACCESS_TOKEN = os.getenv("WHATSAPP_ACCESS_TOKEN", "")
+WHATSAPP_VERIFY_SSL = os.getenv("WHATSAPP_VERIFY_SSL", "true").lower() != "false"
+WHATSAPP_API_URL = f"https://graph.facebook.com/v21.0/{WHATSAPP_PHONE_NUMBER_ID}/messages"
+
+
+def send_whatsapp_notification(to_number: str, contact_name: str, contact_title: str,
+                                contact_company: str, contact_phone: str, contact_email: str,
+                                request_id: int) -> tuple[bool, str]:
+    """
+    Send a WhatsApp message to the requester with the approved contact's details.
+    Returns (success: bool, message: str).
+    """
+    if not WHATSAPP_ACCESS_TOKEN or not WHATSAPP_PHONE_NUMBER_ID:
+        return False, "WhatsApp credentials not configured"
+
+    message_text = (
+        f"✅ *Introduction Approved!*\n\n"
+        f"Your request *REQ-{request_id:04d}* has been approved.\n\n"
+        f"Here are the contact details:\n"
+        f"👤 *Name:* {contact_name}\n"
+        f"💼 *Title:* {contact_title}\n"
+        f"🏢 *Company:* {contact_company}\n"
+        f"📞 *Phone:* {contact_phone or 'N/A'}\n"
+        f"📧 *Email:* {contact_email or 'N/A'}\n\n"
+        f"Please reach out directly. Let us know if you need anything else!"
+    )
+
+    headers = {
+        "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": to_number,
+        "type": "text",
+        "text": {"body": message_text},
+    }
+
+    try:
+        verify_ssl = WHATSAPP_VERIFY_SSL
+        resp = requests.post(WHATSAPP_API_URL, headers=headers, json=payload, timeout=15, verify=verify_ssl)
+        if resp.status_code == 200:
+            return True, f"WhatsApp message sent to {to_number}"
+        else:
+            return False, f"WhatsApp API error {resp.status_code}: {resp.text}"
+    except Exception as e:
+        return False, f"WhatsApp send failed: {str(e)}"
+
 st.set_page_config(
     page_title="AI Middleman",
     page_icon="🤝",
@@ -654,11 +704,25 @@ CREATE TABLE IF NOT EXISTS introduction_requests (
                         reject_key = f"reject_{req['request_id']}"
 
                         if st.button("✅ Approve", key=approve_key, type="primary", use_container_width=True):
+                            # Update database
                             run_execute(
                                 "UPDATE introduction_requests SET status = 'approved', reviewed_at = CURRENT_TIMESTAMP WHERE id = $1",
                                 req['request_id']
                             )
-                            st.success(f"Request #{req['request_id']:04d} approved!")
+                            # Send WhatsApp notification with contact details
+                            success, msg = send_whatsapp_notification(
+                                to_number=req['requester_number'],
+                                contact_name=req['full_name'],
+                                contact_title=req['title'],
+                                contact_company=req['company'],
+                                contact_phone=req.get('phone', ''),
+                                contact_email=req.get('email', ''),
+                                request_id=req['request_id'],
+                            )
+                            if success:
+                                st.success(f"Request #{req['request_id']:04d} approved! Contact details sent to {req['requester_number']}.")
+                            else:
+                                st.warning(f"Request #{req['request_id']:04d} approved in database, but WhatsApp notification failed: {msg}")
                             st.rerun()
 
                         if st.button("❌ Reject", key=reject_key, use_container_width=True):
@@ -666,6 +730,30 @@ CREATE TABLE IF NOT EXISTS introduction_requests (
                                 "UPDATE introduction_requests SET status = 'rejected', reviewed_at = CURRENT_TIMESTAMP WHERE id = $1",
                                 req['request_id']
                             )
+                            # Send rejection notification
+                            rejection_text = (
+                                f"❌ *Introduction Request Update*\n\n"
+                                f"Your request *REQ-{req['request_id']:04d}* could not be fulfilled at this time.\n\n"
+                                f"Please try another search or contact us for assistance."
+                            )
+                            try:
+                                requests.post(
+                                    WHATSAPP_API_URL,
+                                    headers={
+                                        "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}",
+                                        "Content-Type": "application/json",
+                                    },
+                                    json={
+                                        "messaging_product": "whatsapp",
+                                        "to": req['requester_number'],
+                                        "type": "text",
+                                        "text": {"body": rejection_text},
+                                    },
+                                    timeout=15,
+                                    verify=WHATSAPP_VERIFY_SSL,
+                                )
+                            except Exception:
+                                pass  # Non-critical if rejection message fails
                             st.warning(f"Request #{req['request_id']:04d} rejected.")
                             st.rerun()
 
