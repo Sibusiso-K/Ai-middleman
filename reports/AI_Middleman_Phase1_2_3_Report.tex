@@ -1698,24 +1698,231 @@ The ``fintech founder in Singapore'' query returned finance professionals rather
 \end{table}
 
 %=====================================================================
+\chapter{Prompt 2: Privacy Layer \& Contact Code System}
+%=====================================================================
+
+This chapter documents the privacy layer added after Phase 3. The core requirement was that WhatsApp users should never see real contact names, phone numbers, or email addresses until the middleman approves an introduction request. This protects the contact database from being scraped and ensures the middleman retains control over who gets introduced to whom.
+
+\section{Privacy Architecture}
+
+The privacy layer introduces a two-gate system:
+
+\begin{enumerate}[itemsep=3pt]
+    \item \textbf{Gate 1 --- Anonymous Search Results:} When a WhatsApp user searches for contacts, they receive results with reference codes (e.g., \texttt{Ref: C-12872}) instead of real names. They see the contact's title, company, location, reasoning, and confidence score---enough to decide if they want an introduction---but no identifying information.
+    \item \textbf{Gate 2 --- Middleman Approval:} When a user requests an introduction (by replying with a number 1--5), the request is logged in the database with status \texttt{pending}. The middleman reviews the request in the dashboard, and only upon approval are the contact's full details (name, phone, email) sent to the requester via WhatsApp.
+\end{enumerate}
+
+\section{New Database Tables}
+
+Two new tables were added to support the privacy flow:
+
+\subsection{\texttt{introduction\_requests}}
+
+\begin{lstlisting}[style=sqlstyle, caption={Introduction Requests Table}]
+CREATE TABLE IF NOT EXISTS introduction_requests (
+    id SERIAL PRIMARY KEY,
+    message_id INTEGER REFERENCES messages(id),
+    requester_number VARCHAR(20) NOT NULL,
+    contact_id INTEGER REFERENCES contacts(id),
+    status VARCHAR(20) DEFAULT 'pending',
+    requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    reviewed_at TIMESTAMP,
+    approved_by VARCHAR(100),
+    notes TEXT
+);
+\end{lstlisting}
+
+This table tracks every introduction request from WhatsApp users. The \texttt{status} field cycles through \texttt{pending} $\rightarrow$ \texttt{approved} or \texttt{rejected}. The \texttt{contact\_id} foreign key links to the actual contact in the \texttt{contacts} table, but this ID is never exposed to the WhatsApp user.
+
+\subsection{\texttt{conversation\_state}}
+
+\begin{lstlisting}[style=sqlstyle, caption={Conversation State Table}]
+CREATE TABLE IF NOT EXISTS conversation_state (
+    id SERIAL PRIMARY KEY,
+    sender_number VARCHAR(20) UNIQUE NOT NULL,
+    last_query TEXT,
+    last_matches JSONB,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+\end{lstlisting}
+
+This table remembers the last set of matches shown to each WhatsApp user. When a user replies with ``1'', ``2'', etc., the system looks up their \texttt{conversation\_state} to map the number to the correct \texttt{contact\_id}. Without this table, the system would have no way to know which contact ``3'' refers to.
+
+\section{Privacy-Safe Response Formatter}
+
+The response formatter was updated to produce WhatsApp messages that hide real names behind reference codes:
+
+\begin{lstlisting}[style=pythonstyle, caption={Privacy-Safe Formatting}]
+def format_whatsapp_response(matches: list, match_quality: str) -> str:
+    lines = []
+    if match_quality == "good":
+        lines.append("✅ Here are the best matches I found:\n")
+    elif match_quality == "partial":
+        lines.append("⚠️ I found some possible matches:\n")
+    else:
+        lines.append("❌ No strong matches found.\n")
+
+    for i, m in enumerate(matches[:5], 1):
+        contact_id = m.get("contact_id", "N/A")
+        confidence = int(m.get("confidence", 0) * 100)
+        emoji = "🟢" if confidence >= 70 else "🟡" if confidence >= 40 else "🔴"
+
+        lines.append(f"{i}. *Ref: C-{contact_id}*")
+        lines.append(f"   {m.get('title', 'N/A')} at {m.get('company', 'N/A')}")
+        lines.append(f"   📍 {m.get('location', 'N/A')}")
+        lines.append(f"   {emoji} {m.get('reasoning', '')}")
+        lines.append(f"   Match: {confidence}%\n")
+
+    lines.append("━" * 20)
+    lines.append("Reply with *1*, *2*, *3*, *4*, or *5* to request an introduction.")
+    return "\n".join(lines)
+\end{lstlisting}
+
+Key design decisions:
+\begin{itemize}[itemsep=3pt]
+    \item \textbf{Reference codes} use the format \texttt{C-XXXXX} where XXXXX is the internal contact ID. This is a one-way mapping---the code cannot be reversed to find the contact without database access.
+    \item \textbf{No names, phones, or emails} appear anywhere in the WhatsApp reply. The user sees only title, company, location, reasoning, and confidence.
+    \item \textbf{Confidence emojis} (🟢🟡🔴) provide an at-a-glance quality indicator without revealing sensitive data.
+    \item \textbf{The instruction} ``Reply with 1, 2, 3, 4, or 5'' creates a clear call-to-action that feeds into the contact selection flow.
+\end{itemize}
+
+\section{Contact Selection Flow}
+
+When a WhatsApp user replies with a number (1--5), the webhook processes it through the following flow:
+
+\begin{verbatim}
+User sends "3"
+    │
+    ▼
+Webhook receives message
+    │
+    ├── Is it a number 1-5?
+    │   ├── YES → Look up conversation_state for this sender
+    │   │         ├── Found? → Map "3" to contact_id from last_matches
+    │   │         │              → INSERT into introduction_requests (status=pending)
+    │   │         │              → Reply: "✅ Request REQ-0001 received. Middleman will review."
+    │   │         └── Not found? → Reply: "Please send a new search first."
+    │   └── NO  → Treat as a new search query
+    │              → Run matching pipeline → Save to conversation_state → Reply with results
+\end{verbatim}
+
+The \texttt{conversation\_state} table is critical here---it bridges the stateless HTTP webhook with the stateful conversation flow. Each time a user sends a new search, their \texttt{last\_matches} JSONB field is updated with the current set of contact IDs. When they reply with a number, the system reads this field to resolve the selection.
+
+\section{Dashboard Approval with WhatsApp Notification}
+
+The Streamlit dashboard's ``Pending Approvals'' page was enhanced to send WhatsApp notifications when the middleman approves or rejects a request.
+
+\subsection{Approve Flow}
+
+When the middleman clicks ✅ Approve:
+
+\begin{enumerate}[itemsep=3pt]
+    \item The database is updated: \texttt{UPDATE introduction\_requests SET status = 'approved', reviewed\_at = CURRENT\_TIMESTAMP}
+    \item A WhatsApp message is sent to the requester with the full contact details:
+    \begin{verbatim}
+    ✅ Introduction Approved!
+
+    Your request REQ-0001 has been approved.
+
+    Here are the contact details:
+    👤 Name: Micheal Summers
+    💼 Title: VP Leveraged Finance
+    🏢 Company: Barclays
+    📞 Phone: +44 20 1234 5678
+    📧 Email: m.summers@barclays.com
+
+    Please reach out directly.
+    \end{verbatim}
+\end{enumerate}
+
+\subsection{Reject Flow}
+
+When the middleman clicks ❌ Reject:
+
+\begin{enumerate}[itemsep=3pt]
+    \item The database is updated: \texttt{UPDATE introduction\_requests SET status = 'rejected', reviewed\_at = CURRENT\_TIMESTAMP}
+    \item A polite rejection notification is sent:
+    \begin{verbatim}
+    ❌ Introduction Request Update
+
+    Your request REQ-0001 could not be fulfilled at this time.
+
+    Please try another search or contact us for assistance.
+    \end{verbatim}
+\end{enumerate}
+
+The WhatsApp notification is sent using the same Graph API endpoint as the webhook replies, but called synchronously from the Streamlit dashboard using the \texttt{requests} library (since Streamlit is synchronous, unlike the async FastAPI webhook).
+
+\section{End-to-End Privacy Flow}
+
+The complete user journey through the privacy layer:
+
+\begin{verbatim}
+1. User: "I need a credit finance specialist in London"
+   Bot:  "✅ Here are the best matches:
+         1. *Ref: C-12872* — VP LevFin at Barclays, London 🟢 95%
+         2. *Ref: C-5905*  — Principal at BlueRiver, London 🟢 85%
+         ...
+         Reply with *1*, *2*, *3*, *4*, or *5*"
+
+2. User: "1"
+   Bot:  "✅ Introduction Request Received
+         Reference: REQ-0001 | Contact: C-12872
+         The middleman will review and be in touch."
+
+3. Middleman (Dashboard): Reviews request, clicks ✅ Approve
+
+4. User receives WhatsApp:
+   "✅ Introduction Approved!
+    👤 Name: Micheal Summers
+    💼 Title: VP Leveraged Finance
+    🏢 Company: Barclays
+    📞 Phone: +44 20 1234 5678
+    📧 Email: m.summers@barclays.com"
+\end{verbatim}
+
+At no point before step 4 does the user see any identifying information. The middleman retains full control over which introductions are made.
+
+\section{Files Modified for Privacy Layer}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{p{5cm}p{8cm}}
+\toprule
+\textbf{File} & \textbf{Change} \\
+\midrule
+\texttt{migrations/002\_privacy\_tables.sql} & New migration: \texttt{introduction\_requests} and \texttt{conversation\_state} tables \\
+\texttt{app/services/response\_formatter.py} & Privacy-safe formatting: \texttt{Ref: C-XXXX} codes, no names/phones/emails \\
+\texttt{app/routes/whatsapp\_webhook.py} & Contact selection flow: handles numeric replies 1--5, logs intro requests \\
+\texttt{dashboard/app.py} & WhatsApp notifications on approve/reject; \texttt{send\_whatsapp\_notification()} function \\
+\bottomrule
+\end{tabular}
+\caption{Files modified for privacy layer and dashboard notifications}
+\end{table}
+
+%=====================================================================
 \chapter{Conclusion}
 %=====================================================================
 
-AI Middleman has progressed from concept to a fully functional WhatsApp-integrated contact matching system across three phases. The system now:
+AI Middleman has progressed from concept to a fully functional WhatsApp-integrated contact matching system with a complete privacy layer. The system now:
 
 \begin{itemize}[itemsep=3pt]
     \item Maintains a database of 50,000 professional contacts with rich metadata across 7 sectors.
     \item Accepts natural language queries via WhatsApp and returns AI-ranked contact recommendations within 2--3 seconds.
     \item Uses a two-stage pipeline (keyword filter + LLM ranking) that balances speed, cost, and intelligence.
     \item Operates at a total cost of \$2--4/month, compared to \$97--354/month for equivalent GPT-4-based solutions.
-    \item Has processed 22 real WhatsApp messages end-to-end with 100\% success rate.
+    \item Has processed 22+ real WhatsApp messages end-to-end with 100\% success rate.
     \item Passes all 16 unit tests covering keyword extraction, response formatting, and pipeline integration.
     \item Produces accurate, location-aware contact rankings with dynamic confidence scores and detailed reasoning.
+    \item Protects contact privacy with a two-gate system: anonymous reference codes in search results, and middleman-approved introduction requests before any identifying information is shared.
+    \item Provides a Streamlit dashboard for the middleman to review and approve/reject introduction requests, with automatic WhatsApp notifications upon decision.
 \end{itemize}
 
 The architectural decisions---PostgreSQL over MongoDB, raw SQL over ORM, Featherless.ai free tier over paid APIs, regex keyword filter over vector embeddings, no LangChain---were each made with specific, documented reasoning. The result is a system that is simple, fast, cheap, and explainable.
 
 A post-Phase-3 matching accuracy fix resolved three critical issues: the LLM agent was being completely bypassed by the matching engine, the LLM prompt lacked specific scoring guidance, and the keyword filter had no location-awareness. After the fix, contact rankings are properly prioritised by location, role relevance, and seniority, with dynamic confidence scores and detailed reasoning.
+
+The Prompt 2 privacy layer added a complete introduction request workflow: anonymous search results with reference codes, a contact selection flow via numeric replies, a pending approvals dashboard, and automatic WhatsApp notifications with full contact details upon middleman approval. This ensures the contact database cannot be scraped through the WhatsApp interface and the middleman retains full control over introductions.
 
 Phase 4 will take this working system to production, replacing the ngrok development tunnel with a proper domain and SSL on Oracle Cloud, adding monitoring and backups, and hardening the security configuration.
 
