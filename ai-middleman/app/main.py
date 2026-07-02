@@ -25,6 +25,7 @@ from contextlib import asynccontextmanager
 from .database import init_db, get_db
 from .services.matching_engine import MatchingEngine
 from .routes.whatsapp_webhook import router as whatsapp_router
+from .routes.friend import router as friend_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -42,6 +43,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="AI Middleman API", lifespan=lifespan)
 
 app.include_router(whatsapp_router)
+app.include_router(friend_router)
 
 @app.get("/")
 async def root():

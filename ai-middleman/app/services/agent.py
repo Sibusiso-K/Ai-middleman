@@ -22,8 +22,30 @@ load_dotenv(Path(__file__).parent.parent.parent / ".env")
 class LLMAgent:
     def __init__(self):
         self.api_key = os.getenv("FEATHERLESS_API_KEY")
-        self.api_url = "https://api.featherless.ai/v1/chat/completions"
-        self.model = "NousResearch/Meta-Llama-3.1-8B-Instruct"
+        self.api_url = os.getenv(
+            "FEATHERLESS_API_URL", "https://api.featherless.ai/v1/chat/completions"
+        )
+        self.model = os.getenv("FEATHERLESS_MODEL", "NousResearch/Meta-Llama-3.1-8B-Instruct")
+        self.timeout = float(os.getenv("AGENT_TIMEOUT_SECONDS", "45"))
+        self.max_retries = int(os.getenv("AGENT_MAX_ATTEMPTS", "3"))
+
+    @staticmethod
+    def _extract_json(content: str) -> Dict[str, Any]:
+        """Parse the model's reply into JSON, tolerating markdown fences or
+        surrounding prose by extracting the outermost {...} object."""
+        text = (content or "").strip()
+        if text.startswith("```"):
+            # strip ```json … ``` fences
+            text = text.split("```", 2)[1] if text.count("```") >= 2 else text.strip("`")
+            if text.lstrip().lower().startswith("json"):
+                text = text.lstrip()[4:]
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            start, end = text.find("{"), text.rfind("}")
+            if start != -1 and end > start:
+                return json.loads(text[start:end + 1])
+            raise
 
     async def evaluate_matches(self, query: str, candidates: List[Dict]) -> Dict[str, Any]:
         if not candidates:
@@ -36,8 +58,7 @@ class LLMAgent:
 
         prompt = self._build_prompt(query, candidates)
 
-        max_retries = 3
-        for attempt in range(max_retries):
+        for attempt in range(1, self.max_retries + 1):
             try:
                 async with httpx.AsyncClient() as client:
                     response = await client.post(
@@ -52,29 +73,27 @@ class LLMAgent:
                             "max_tokens": 1024,
                             "temperature": 0.1
                         },
-                        timeout=30.0
+                        timeout=self.timeout
                     )
 
-                    if response.status_code == 200:
-                        result = response.json()
-                        content = result["choices"][0]["message"]["content"]
-                        parsed = json.loads(content)
-                        return parsed
-                    elif response.status_code == 429:
-                        retry_after = 5 * (attempt + 1)
-                        print(f"Rate limited, retrying in {retry_after}s (attempt {attempt+1}/{max_retries})")
-                        await asyncio.sleep(retry_after)
-                        continue
-                    else:
-                        print(f"Featherless error: {response.status_code} {response.text}")
-                        return self._fallback_response()
+                if response.status_code == 200:
+                    content = response.json()["choices"][0]["message"]["content"]
+                    try:
+                        return self._extract_json(content)
+                    except json.JSONDecodeError as e:
+                        # Malformed / non-JSON reply — retry (transient LLM behaviour).
+                        print(f"[Agent] unparseable reply (attempt {attempt}/{self.max_retries}): {e}")
+                elif response.status_code == 429 or response.status_code >= 500:
+                    print(f"[Agent] retryable HTTP {response.status_code} (attempt {attempt}/{self.max_retries})")
+                else:
+                    print(f"[Agent] non-retryable HTTP {response.status_code}: {response.text[:200]}")
+                    return self._fallback_response()
 
-            except Exception as e:
-                print(f"LLM Agent error (attempt {attempt+1}): {e}")
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(3)
-                    continue
-                return self._fallback_response()
+            except (httpx.TimeoutException, httpx.TransportError) as e:
+                print(f"[Agent] transient error (attempt {attempt}/{self.max_retries}): {type(e).__name__}: {e!r}")
+
+            if attempt < self.max_retries:
+                await asyncio.sleep(3 * attempt)  # linear backoff: 3s, 6s, …
 
         return self._fallback_response()
 

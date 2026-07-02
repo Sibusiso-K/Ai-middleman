@@ -1,27 +1,37 @@
 """
-whatsapp_webhook.py — FastAPI webhook receiver for WhatsApp Business Cloud API.
+whatsapp_webhook.py — Webhook handler for AI Middleman (Phase 2).
 
-Handles:
-- GET /webhook/whatsapp: Meta verification handshake
-- POST /webhook/whatsapp: Incoming message processing
+Number-role model (authoritative):
+  - 27650746242 = our Cloud API number (phone_number_id / webhook / token).
+    The friend dashboard drives this number to play "Sam" (sends FROM it).
+  - 27736013348 = Alex's real consumer WhatsApp (web.whatsapp.com).
 
-Privacy layer: replies never reveal personal contact details.
-Contact selection (1-5) triggers an introduction request logged for middleman approval.
+Therefore the ONLY inbound webhook traffic we care about is ALEX texting our
+Cloud API number (736013348 -> 650746242). Sam's messages do NOT arrive here —
+they are injected by the friend dashboard via POST /friend/send.
 
-Pipeline: receive → save → match → format → reply
+What Alex can send (all handled here):
+  - Interactive button reply on a pending draft  -> Send / Skip
+  - Text command with a pending draft:  SEND / EDIT <text> / SKIP
+  - Any other free-text                          -> treated as Alex's own reply
+                                                    to Sam (logged as alex_reply)
+
+"Delivering to Sam" is virtual: Sam is the friend dashboard, which polls the
+thread's events. So resolving a draft or forwarding Alex's reply just means
+recording the appropriate thread_event — no outbound WhatsApp is sent to Sam.
+
+LOOP PREVENTION: messages sent FROM our own Cloud API number are ignored.
 """
 
-from fastapi import APIRouter, Request, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, Request, HTTPException, Query
 import hashlib
 import hmac
-import os
 import json
-import logging
+import os
 from dotenv import load_dotenv
 from pathlib import Path
 
-from app.services.matching_engine import MatchingEngine
-from app.services.whatsapp_client import WhatsAppClient
+from app.services.conversation_manager import ConversationManager
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
@@ -29,17 +39,19 @@ router = APIRouter()
 
 APP_SECRET = os.getenv("WHATSAPP_APP_SECRET")
 VERIFY_TOKEN = os.getenv("WHATSAPP_VERIFY_TOKEN")
+BUSINESS_NUMBER = os.getenv("BUSINESS_PHONE_NUMBER", "27650746242")
+ALEX_NUMBER = os.getenv("ALEX_WHATSAPP_NUMBER", "27736013348")
 
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.FileHandler(Path(__file__).parent.parent.parent / "webhook.log"),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger("webhook")
+ALEX_COMMANDS = {"SEND", "SKIP", "STATUS"}
+
+
+def is_alex_command(text: str) -> bool:
+    text_upper = text.strip().upper()
+    return (
+        text_upper in ALEX_COMMANDS
+        or text_upper.startswith("EDIT ")
+        or text_upper.startswith("EDIT:")
+    )
 
 
 def verify_signature(payload: bytes, signature: str) -> bool:
@@ -57,141 +69,122 @@ async def verify_webhook(
     hub_verify_token: str = Query(alias="hub.verify_token"),
     hub_challenge: str = Query(alias="hub.challenge"),
 ):
-    """Meta calls this once when you set the Callback URL, to verify ownership."""
+    """Meta verification handshake."""
     if hub_mode == "subscribe" and hub_verify_token == VERIFY_TOKEN:
         return int(hub_challenge)
     raise HTTPException(status_code=403, detail="Verification failed")
 
 
 @router.post("/webhook/whatsapp")
-async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
+async def receive_webhook(request: Request):
     payload = await request.body()
     signature = request.headers.get("X-Hub-Signature-256", "")
 
-    # Signature check — log warning but don't block (temporarily relaxed for debugging)
     if APP_SECRET and not verify_signature(payload, signature):
-        logger.warning("Invalid webhook signature — allowing through for debugging")
+        print("[WARNING] Invalid webhook signature — allowing through for debugging")
 
-    data = await request.json()
+    # Parse defensively: a malformed body must not 500 (that makes Meta
+    # retry-storm). Decode leniently — real Meta payloads are valid UTF-8.
+    try:
+        data = json.loads(payload.decode("utf-8", errors="replace"))
+    except (ValueError, AttributeError) as e:
+        print(f"[Webhook] Could not parse body as JSON: {e}")
+        return {"status": "ignored"}
 
-    if data.get("object") != "whatsapp_business_account":
+    if not isinstance(data, dict) or data.get("object") != "whatsapp_business_account":
         return {"status": "ignored"}
 
     try:
         for entry in data.get("entry", []):
             for change in entry.get("changes", []):
                 if change.get("field") == "messages":
-                    background_tasks.add_task(process_message, request.app.state.db_pool, change["value"])
+                    await route_message(request.app.state.db_pool, change["value"])
     except Exception as e:
-        logger.error(f"Webhook processing error: {e}")
+        print(f"[ERROR] Webhook processing error: {e}")
 
     return {"status": "received"}
 
 
-async def process_message(db_pool, value: dict):
-    try:
-        messages = value.get("messages", [])
-        if not messages:
-            return
-
-        message = messages[0]
-        if message.get("type") != "text":
-            return
-
-        sender = message["from"]
-        text = message["text"]["body"].strip()
-
-        logger.info(f"Message from {sender}: {text}")
-
-        # Save inbound message and get its ID
-        async with db_pool.acquire() as conn:
-            msg_row = await conn.fetchrow(
-                "INSERT INTO messages (sender_number, message_text) VALUES ($1, $2) RETURNING id",
-                sender, text
-            )
-            message_id = msg_row['id']
-
-        # Check if user is selecting a contact (replies 1-5)
-        if text in ['1', '2', '3', '4', '5']:
-            await handle_contact_selection(db_pool, sender, text, message_id)
-            return
-
-        # Run full matching pipeline
-        engine = MatchingEngine(db_pool)
-        result = await engine.match(text)
-
-        # Save conversation state so we remember what was shown
-        async with db_pool.acquire() as conn:
-            await conn.execute("""
-                INSERT INTO conversation_state (sender_number, last_matches, last_query, updated_at)
-                VALUES ($1, $2::jsonb, $3, CURRENT_TIMESTAMP)
-                ON CONFLICT (sender_number) DO UPDATE
-                SET last_matches = $2::jsonb,
-                    last_query = $3,
-                    updated_at = CURRENT_TIMESTAMP
-            """, sender, json.dumps(result['matches']), text)
-
-        # Send privacy-safe reply
-        whatsapp_client = WhatsAppClient()
-        await whatsapp_client.send_message(to=sender, text=result["formatted_response"])
-
-        logger.info(f"Replied to {sender} with match_quality={result['match_quality']}")
-
-    except Exception as e:
-        logger.error(f"Background task error: {e}", exc_info=True)
-
-
-async def handle_contact_selection(db_pool, sender: str, selection: str, message_id: int):
-    """User replied with 1-5 to select a contact. Log introduction request for approval."""
-    whatsapp_client = WhatsAppClient()
-
-    async with db_pool.acquire() as conn:
-        state = await conn.fetchrow(
-            "SELECT last_matches, last_query FROM conversation_state WHERE sender_number = $1",
-            sender
-        )
-
-    if not state or not state['last_matches']:
-        await whatsapp_client.send_message(
-            to=sender,
-            text="I don't have any recent matches on file. Please send a new search request."
-        )
+async def route_message(db_pool, value: dict):
+    """Route an inbound message. In Phase 2 all inbound traffic is Alex acting
+    on his real WhatsApp; the thread is the single Sam<->Alex conversation,
+    keyed by Alex's number."""
+    messages = value.get("messages", [])
+    if not messages:
         return
 
-    matches = state['last_matches']
-    # Handle both string (JSON) and already-parsed dict/list
-    if isinstance(matches, str):
-        matches = json.loads(matches)
+    message = messages[0]
+    sender = message.get("from")
+    msg_type = message.get("type")
 
-    idx = int(selection) - 1
-
-    if idx >= len(matches):
-        await whatsapp_client.send_message(
-            to=sender,
-            text=f"Please reply with a number between 1 and {len(matches)}."
-        )
+    # Loop prevention: ignore anything from our own Cloud API number.
+    if sender == BUSINESS_NUMBER:
+        print("[Route] Ignoring self-message from Cloud API number")
         return
 
-    selected = matches[idx]
-    contact_id = selected.get('contact_id')
+    manager = ConversationManager(db_pool)
+    thread = await manager.get_or_create_thread(ALEX_NUMBER)
+    thread_id = thread["id"]
 
-    # Log the introduction request
-    async with db_pool.acquire() as conn:
-        req = await conn.fetchrow("""
-            INSERT INTO introduction_requests
-            (message_id, requester_number, contact_id, status)
-            VALUES ($1, $2, $3, 'pending')
-            RETURNING id
-        """, message_id, sender, contact_id)
-        request_id = req['id']
+    # Interactive button reply (Send / Skip tap on a draft).
+    if msg_type == "interactive":
+        interactive = message.get("interactive", {})
+        if interactive.get("type") == "button_reply":
+            reply_id = interactive.get("button_reply", {}).get("id", "")
+            print(f"[Route] Button reply from {sender}: {reply_id}")
+            await handle_button_reply(manager, thread_id, reply_id)
+        return
 
-    # Confirm to user — no personal details
-    confirmation = (
-        f"✅ *Introduction Request Received*\n\n"
-        f"Reference: *REQ-{request_id:04d}*\n"
-        f"Contact: *C-{contact_id}*\n\n"
-        f"The middleman will review your request and be in touch shortly.\n\n"
-        f"_Typical response time: within 24 hours_"
-    )
-    await whatsapp_client.send_message(to=sender, text=confirmation)
-    logger.info(f"Introduction request REQ-{request_id:04d} logged: sender={sender}, contact={contact_id}")
+    if msg_type != "text":
+        return
+
+    text = message["text"]["body"].strip()
+    print(f"[Route] From Alex ({sender}): {text[:80]}")
+
+    pending = await manager.get_latest_pending_draft(thread_id)
+
+    # Alex commands only apply when there is a draft awaiting his decision.
+    if pending and is_alex_command(text):
+        await handle_alex_command(manager, thread_id, text, pending)
+        return
+
+    # Otherwise this is Alex chatting back to Sam in his own words.
+    await manager.add_event(thread_id, "alex_reply", {"text": text})
+    print(f"[Route] Logged Alex's free-text reply to Sam")
+
+
+async def handle_alex_command(manager, thread_id, text, pending):
+    """Resolve a pending draft from a typed command. Delivering to Sam is
+    virtual — we just record the resolution event for the friend dashboard."""
+    text_upper = text.strip().upper()
+
+    if text_upper == "SEND":
+        await manager.mark_draft_handled(thread_id, "sent", pending.get("draft_reply", ""))
+        print("[Alex] SEND — draft delivered to Sam")
+
+    elif text_upper.startswith("EDIT ") or text_upper.startswith("EDIT:"):
+        custom = text[5:].strip()
+        if custom:
+            await manager.mark_draft_handled(thread_id, "edited", custom)
+            print("[Alex] EDIT — custom reply delivered to Sam")
+
+    elif text_upper == "SKIP":
+        await manager.mark_draft_handled(thread_id, "skipped", "")
+        print("[Alex] SKIP — request dropped, nothing delivered to Sam")
+
+
+async def handle_button_reply(manager, thread_id, reply_id: str):
+    """Handle a Send/Skip button tap. Button id format: send_<eventid> / skip_<eventid>."""
+    pending = await manager.get_latest_pending_draft(thread_id)
+    if not pending:
+        print("[Button] No pending draft to act on")
+        return
+
+    if reply_id.startswith("send_"):
+        await manager.mark_draft_handled(thread_id, "sent", pending.get("draft_reply", ""))
+        print("[Button] SEND — draft delivered to Sam")
+    elif reply_id.startswith("skip_"):
+        await manager.mark_draft_handled(thread_id, "skipped", "")
+        print("[Button] SKIP — request dropped")
+    else:
+        print(f"[Button] Unknown button id: {reply_id}")

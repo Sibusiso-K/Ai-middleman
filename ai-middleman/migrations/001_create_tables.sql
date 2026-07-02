@@ -49,6 +49,15 @@ CREATE TABLE IF NOT EXISTS match_history (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Conversation state table (for pending drafts / Alex approval flow)
+CREATE TABLE IF NOT EXISTS conversation_state (
+    id SERIAL PRIMARY KEY,
+    sender_number VARCHAR(20) UNIQUE NOT NULL,
+    last_matches JSONB DEFAULT '{}'::jsonb,
+    last_query TEXT,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_contacts_fullname ON contacts(full_name);
 CREATE INDEX IF NOT EXISTS idx_contacts_title ON contacts(title);

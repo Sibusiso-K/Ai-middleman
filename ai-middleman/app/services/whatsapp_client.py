@@ -63,3 +63,49 @@ class WhatsAppClient:
                 return response.json()
             except Exception:
                 return {"raw_response": response.text}
+
+    async def send_interactive_buttons(
+        self,
+        to: str,
+        body_text: str,
+        buttons: list[dict],
+    ) -> dict:
+        """
+        Send an interactive button message via the Meta Cloud API.
+
+        Args:
+            to: Recipient WhatsApp number
+            body_text: Message body (max 1024 chars)
+            buttons: List of button dicts, each with:
+                {"type": "reply", "reply": {"id": "...", "title": "..."}}
+                Max 3 buttons, each title max 20 chars, id max 256 chars.
+
+        Returns:
+            API response dict or error dict.
+        """
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": to,
+            "type": "interactive",
+            "interactive": {
+                "type": "button",
+                "body": {"text": body_text},
+                "action": {"buttons": buttons}
+            }
+        }
+
+        async with httpx.AsyncClient(verify=_VERIFY, follow_redirects=True) as client:
+            response = await client.post(self.api_url, headers=headers, json=payload, timeout=15.0)
+
+            if response.status_code != 200:
+                print(f"WhatsApp interactive send error: {response.status_code} {response.text}")
+                return {"error": response.status_code, "body": response.text}
+
+            try:
+                return response.json()
+            except Exception:
+                return {"raw_response": response.text}

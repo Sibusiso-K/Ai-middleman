@@ -1,17 +1,19 @@
 """
 dashboard/app.py — Streamlit dashboard for AI Middleman.
 
-Five pages:
+Pages:
+  0. Live Threads — Alex's control surface: live conversation threads with
+     inline draft suggestions, SEND/EDIT/SKIP, and per-thread autonomy toggle
   1. Database Overview — metrics, charts, VIP table
   2. Match Tester — natural language query testing with styled results
   3. Contact Browser — filtered search with expandable detail
   4. Analytics — scatter plots, bar charts, top-10 tables
-  5. Pending Approvals — introduction request review (middleman only)
 
 Connects directly to PostgreSQL via asyncpg and the FastAPI match endpoint.
 """
 
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -30,56 +32,6 @@ load_dotenv(env_path)
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:yourpassword@localhost:5432/aimiddleman")
 API_URL = "http://localhost:8000"
-
-# WhatsApp API config for sending notifications from dashboard
-WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "")
-WHATSAPP_ACCESS_TOKEN = os.getenv("WHATSAPP_ACCESS_TOKEN", "")
-WHATSAPP_VERIFY_SSL = os.getenv("WHATSAPP_VERIFY_SSL", "true").lower() != "false"
-WHATSAPP_API_URL = f"https://graph.facebook.com/v21.0/{WHATSAPP_PHONE_NUMBER_ID}/messages"
-
-
-def send_whatsapp_notification(to_number: str, contact_name: str, contact_title: str,
-                                contact_company: str, contact_phone: str, contact_email: str,
-                                request_id: int) -> tuple[bool, str]:
-    """
-    Send a WhatsApp message to the requester with the approved contact's details.
-    Returns (success: bool, message: str).
-    """
-    if not WHATSAPP_ACCESS_TOKEN or not WHATSAPP_PHONE_NUMBER_ID:
-        return False, "WhatsApp credentials not configured"
-
-    message_text = (
-        f"✅ *Introduction Approved!*\n\n"
-        f"Your request *REQ-{request_id:04d}* has been approved.\n\n"
-        f"Here are the contact details:\n"
-        f"👤 *Name:* {contact_name}\n"
-        f"💼 *Title:* {contact_title}\n"
-        f"🏢 *Company:* {contact_company}\n"
-        f"📞 *Phone:* {contact_phone or 'N/A'}\n"
-        f"📧 *Email:* {contact_email or 'N/A'}\n\n"
-        f"Please reach out directly. Let us know if you need anything else!"
-    )
-
-    headers = {
-        "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": to_number,
-        "type": "text",
-        "text": {"body": message_text},
-    }
-
-    try:
-        verify_ssl = WHATSAPP_VERIFY_SSL
-        resp = requests.post(WHATSAPP_API_URL, headers=headers, json=payload, timeout=15, verify=verify_ssl)
-        if resp.status_code == 200:
-            return True, f"WhatsApp message sent to {to_number}"
-        else:
-            return False, f"WhatsApp API error {resp.status_code}: {resp.text}"
-    except Exception as e:
-        return False, f"WhatsApp send failed: {str(e)}"
 
 st.set_page_config(
     page_title="AI Middleman",
@@ -137,11 +89,12 @@ st.sidebar.markdown("---")
 page = st.sidebar.radio(
     "Navigation",
     [
+        "🧑 Friend — Sam",
+        "💬 Live Threads",
         "📊 Database Overview",
         "🔍 Match Tester",
         "📋 Contact Browser",
         "📈 Analytics",
-        "📥 Pending Approvals",
     ],
 )
 
@@ -172,10 +125,165 @@ st.sidebar.caption("AI Middleman Dashboard v1.0")
 
 
 # ═══════════════════════════════════════════════════════════════════
+# PAGE 0 — Friend (Sam): role-play the friend, two-way WhatsApp chat
+# ═══════════════════════════════════════════════════════════════════
+
+if page == "🧑 Friend — Sam":
+    st.title("🧑 Friend — Sam")
+    st.caption("Send messages as Sam. They go to Alex's real WhatsApp; his replies come back here.")
+
+    st.info(
+        "ℹ️ Messages send from the Cloud API number (27650746242) to Alex (27736013348). "
+        "Alex must have messaged that number within the last 24h for WhatsApp to accept free-form sends."
+    )
+
+    col_ar, col_rf = st.columns([1, 1])
+    auto_refresh = col_ar.checkbox("Auto-refresh every 3s", value=False, key="friend_autorefresh")
+    if col_rf.button("🔄 Refresh now", key="friend_refresh"):
+        st.rerun()
+
+    # ── Load the conversation ──
+    events = []
+    try:
+        resp = requests.get(f"{API_URL}/friend/thread", timeout=10)
+        if resp.status_code == 200:
+            events = resp.json().get("events", [])
+        else:
+            st.error(f"Could not load thread: {resp.status_code}")
+    except Exception as e:
+        st.error(f"Could not reach API: {e}")
+
+    # ── Render transcript ──
+    for e in events:
+        etype = e.get("event_type")
+        payload = e.get("payload", {})
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+
+        if etype == "friend_message":
+            with st.chat_message("user"):
+                st.markdown(f"**Sam:** {payload.get('text', '')}")
+        elif etype == "alex_reply":
+            with st.chat_message("assistant"):
+                st.markdown(f"**Alex:** {payload.get('text', '')}")
+        elif etype == "draft_sent":
+            with st.chat_message("assistant"):
+                st.markdown(f"**Alex:** {payload.get('final_text', '')}")
+        elif etype == "draft_skipped":
+            st.caption("— Alex skipped a suggested reply (nothing sent) —")
+        elif etype == "draft_suggested":
+            st.caption("⏳ Alex has a suggested reply pending on his WhatsApp…")
+
+    if not events:
+        st.caption("No messages yet. Say hi as Sam below 👇")
+
+    # ── Input box ──
+    prompt = st.chat_input("Message as Sam…")
+    if prompt:
+        try:
+            r = requests.post(f"{API_URL}/friend/send", json={"text": prompt}, timeout=90)
+            if r.status_code == 200:
+                data = r.json()
+                if not data.get("relayed_to_alex"):
+                    st.warning("Message logged, but WhatsApp relay to Alex failed (check the 24h window / token).")
+            else:
+                st.error(f"Send failed: {r.status_code} {r.text}")
+        except Exception as e:
+            st.error(f"Send failed: {e}")
+        st.rerun()
+
+    if auto_refresh:
+        # Non-blocking: reload the page in 3s instead of sleeping the script
+        # thread (which would leave Streamlit stuck in a "Running…" state).
+        components.html(
+            "<script>setTimeout(function(){ window.parent.location.reload(); }, 3000);</script>",
+            height=0,
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════
+# PAGE 0b — Live Threads (read-only monitoring; approval happens on WhatsApp)
+# ═══════════════════════════════════════════════════════════════════
+
+elif page == "💬 Live Threads":
+    st.title("💬 Live Threads")
+    st.caption("Read-only monitoring of every thread. Draft approval happens on Alex's WhatsApp, not here.")
+
+    auto_refresh = st.checkbox("Auto-refresh every 3s", value=False)
+
+    threads = run_query("""
+        SELECT t.id, t.sender_number, t.autonomy_mode, t.updated_at,
+               (SELECT COUNT(*) FROM thread_events e
+                WHERE e.thread_id = t.id AND e.event_type = 'draft_suggested'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM thread_events e2
+                      WHERE e2.thread_id = t.id
+                        AND e2.event_type IN ('draft_sent', 'draft_edited', 'draft_skipped')
+                        AND e2.created_at > e.created_at
+                  )) AS pending_count
+        FROM threads t
+        ORDER BY t.updated_at DESC
+    """)
+
+    if not threads:
+        st.info("No conversations yet — once a message flows through the system, threads show up here.")
+    else:
+        pending_total = sum(t["pending_count"] for t in threads)
+        st.markdown(f"**{len(threads)}** thread(s) · **{pending_total}** draft(s) awaiting Alex on WhatsApp")
+        st.markdown("---")
+
+        for t in threads:
+            pending_badge = f" 🟡 {t['pending_count']} pending" if t["pending_count"] else ""
+            with st.expander(f"📱 {t['sender_number']}{pending_badge}", expanded=t["pending_count"] > 0):
+                st.caption(f"Last activity: {t['updated_at'].strftime('%Y-%m-%d %H:%M') if t['updated_at'] else 'N/A'}")
+
+                events = run_query("""
+                    SELECT id, event_type, payload, created_at
+                    FROM thread_events
+                    WHERE thread_id = $1
+                    ORDER BY created_at ASC
+                """, t["id"])
+
+                for e in events:
+                    payload = e["payload"] if isinstance(e["payload"], dict) else json.loads(e["payload"])
+                    ts = e["created_at"].strftime("%H:%M") if e["created_at"] else ""
+                    etype = e["event_type"]
+
+                    if etype == "friend_message":
+                        st.markdown(f"**{ts} · 🧑 Sam:** {payload.get('text', '')}")
+
+                    elif etype == "alex_reply":
+                        st.markdown(f"**{ts} · 👤 Alex:** {payload.get('text', '')}")
+
+                    elif etype == "draft_suggested":
+                        matches = payload.get("matches", [])
+                        with st.container(border=True):
+                            st.markdown(f"**{ts} · 🤖 Draft suggested (on Alex's WhatsApp)**")
+                            if matches:
+                                for i, m in enumerate(matches[:5], 1):
+                                    conf = int(m.get("confidence", 0) * 100)
+                                    st.caption(f"{i}. {m.get('name', 'Unknown')} — {m.get('title', '')} at {m.get('company', '')} ({conf}%)")
+                            else:
+                                st.caption("No strong matches found.")
+                            st.caption(f"Draft: _{payload.get('draft_reply', '')}_")
+
+                    elif etype in ("draft_sent", "draft_edited", "draft_skipped"):
+                        label = {"draft_sent": "✅ Sent", "draft_edited": "✏️ Sent (edited)", "draft_skipped": "❌ Skipped"}[etype]
+                        final_text = payload.get("final_text", "")
+                        st.caption(f"{ts} · {label}" + (f": {final_text}" if final_text else ""))
+
+    if auto_refresh:
+        components.html(
+            "<script>setTimeout(function(){ window.parent.location.reload(); }, 3000);</script>",
+            height=0,
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════
 # PAGE 1 — Database Overview
 # ═══════════════════════════════════════════════════════════════════
 
-if page == "📊 Database Overview":
+elif page == "📊 Database Overview":
     st.title("🤝 AI Middleman — Contact Intelligence Platform")
     st.caption("Automating business connections through intelligent AI matching")
     st.markdown("---")
@@ -614,173 +722,3 @@ elif page == "📈 Analytics":
         st.info("No intros data available.")
 
 
-# ═══════════════════════════════════════════════════════════════════
-# PAGE 5 — Pending Approvals
-# ═══════════════════════════════════════════════════════════════════
-
-elif page == "📥 Pending Approvals":
-    st.title("📥 Pending Approvals")
-    st.caption("Review and approve introduction requests from WhatsApp users.")
-
-    # Check if introduction_requests table exists
-    table_check = run_query("""
-        SELECT EXISTS (
-            SELECT FROM information_schema.tables
-            WHERE table_name = 'introduction_requests'
-        )
-    """)
-    table_exists = table_check[0]["exists"] if table_check else False
-
-    if not table_exists:
-        st.warning("⚠️ The `introduction_requests` table does not exist yet. Run the migration SQL to create it.")
-        st.code("""
-CREATE TABLE IF NOT EXISTS introduction_requests (
-    id SERIAL PRIMARY KEY,
-    message_id INTEGER REFERENCES messages(id),
-    requester_number VARCHAR(20) NOT NULL,
-    contact_id INTEGER REFERENCES contacts(id),
-    status VARCHAR(20) DEFAULT 'pending',
-    requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    reviewed_at TIMESTAMP,
-    approved_by VARCHAR(100),
-    notes TEXT
-);
-        """, language="sql")
-    else:
-        # Fetch pending requests with contact details
-        pending = run_query("""
-            SELECT
-                r.id AS request_id,
-                r.requester_number,
-                r.requested_at,
-                r.status,
-                c.id AS contact_id,
-                c.full_name,
-                c.phone,
-                c.email,
-                c.company,
-                c.title,
-                c.sector,
-                c.location,
-                c.comment,
-                c.relationship_strength,
-                c.is_vip
-            FROM introduction_requests r
-            JOIN contacts c ON r.contact_id = c.id
-            WHERE r.status = 'pending'
-            ORDER BY r.requested_at DESC
-        """)
-
-        if not pending:
-            st.success("✅ No pending approvals — all caught up!")
-        else:
-            st.markdown(f"**{len(pending)}** pending request(s)")
-
-            for req in pending:
-                with st.container(border=True):
-                    col_main, col_actions = st.columns([4, 1])
-
-                    with col_main:
-                        vip_badge = " ⭐ VIP" if req['is_vip'] else ""
-                        st.markdown(f"### Request #{req['request_id']:04d}{vip_badge}")
-                        st.markdown(f"**Requester:** {req['requester_number']}")
-                        st.markdown(f"**Requested:** {req['requested_at'].strftime('%Y-%m-%d %H:%M') if req['requested_at'] else 'N/A'}")
-
-                        st.markdown("---")
-                        st.markdown(f"**Contact:** {req['full_name']}")
-                        st.markdown(f"**Title:** {req['title']}")
-                        st.markdown(f"**Company:** {req['company']}")
-                        st.markdown(f"**Sector:** {req.get('sector', 'N/A')}")
-                        st.markdown(f"**Location:** {req.get('location', 'N/A')}")
-                        st.markdown(f"**Phone:** {req.get('phone', 'N/A')}")
-                        st.markdown(f"**Email:** {req.get('email', 'N/A')}")
-                        st.markdown(f"**Relationship:** {'⭐' * (req.get('relationship_strength') or 0)}")
-                        if req.get('comment'):
-                            st.caption(f"💬 {req['comment']}")
-
-                    with col_actions:
-                        st.markdown("<br>" * 3, unsafe_allow_html=True)  # vertical spacing
-                        approve_key = f"approve_{req['request_id']}"
-                        reject_key = f"reject_{req['request_id']}"
-
-                        if st.button("✅ Approve", key=approve_key, type="primary", use_container_width=True):
-                            # Update database
-                            run_execute(
-                                "UPDATE introduction_requests SET status = 'approved', reviewed_at = CURRENT_TIMESTAMP WHERE id = $1",
-                                req['request_id']
-                            )
-                            # Send WhatsApp notification with contact details
-                            success, msg = send_whatsapp_notification(
-                                to_number=req['requester_number'],
-                                contact_name=req['full_name'],
-                                contact_title=req['title'],
-                                contact_company=req['company'],
-                                contact_phone=req.get('phone', ''),
-                                contact_email=req.get('email', ''),
-                                request_id=req['request_id'],
-                            )
-                            if success:
-                                st.success(f"Request #{req['request_id']:04d} approved! Contact details sent to {req['requester_number']}.")
-                            else:
-                                st.warning(f"Request #{req['request_id']:04d} approved in database, but WhatsApp notification failed: {msg}")
-                            st.rerun()
-
-                        if st.button("❌ Reject", key=reject_key, use_container_width=True):
-                            run_execute(
-                                "UPDATE introduction_requests SET status = 'rejected', reviewed_at = CURRENT_TIMESTAMP WHERE id = $1",
-                                req['request_id']
-                            )
-                            # Send rejection notification
-                            rejection_text = (
-                                f"❌ *Introduction Request Update*\n\n"
-                                f"Your request *REQ-{req['request_id']:04d}* could not be fulfilled at this time.\n\n"
-                                f"Please try another search or contact us for assistance."
-                            )
-                            try:
-                                requests.post(
-                                    WHATSAPP_API_URL,
-                                    headers={
-                                        "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}",
-                                        "Content-Type": "application/json",
-                                    },
-                                    json={
-                                        "messaging_product": "whatsapp",
-                                        "to": req['requester_number'],
-                                        "type": "text",
-                                        "text": {"body": rejection_text},
-                                    },
-                                    timeout=15,
-                                    verify=WHATSAPP_VERIFY_SSL,
-                                )
-                            except Exception:
-                                pass  # Non-critical if rejection message fails
-                            st.warning(f"Request #{req['request_id']:04d} rejected.")
-                            st.rerun()
-
-        # Show recent history
-        st.markdown("---")
-        st.subheader("📋 Recent Decisions")
-        recent = run_query("""
-            SELECT
-                r.id AS request_id,
-                r.requester_number,
-                r.status,
-                r.requested_at,
-                r.reviewed_at,
-                c.full_name,
-                c.company
-            FROM introduction_requests r
-            JOIN contacts c ON r.contact_id = c.id
-            WHERE r.status != 'pending'
-            ORDER BY r.reviewed_at DESC NULLS LAST
-            LIMIT 20
-        """)
-
-        if recent:
-            df_recent = pd.DataFrame(recent)
-            df_recent.columns = ["Request ID", "Requester", "Status", "Requested", "Reviewed", "Contact", "Company"]
-            status_emoji = {"approved": "✅", "rejected": "❌"}
-            df_recent["Status"] = df_recent["Status"].apply(lambda x: f"{status_emoji.get(x, '')} {x}")
-            st.dataframe(df_recent, use_container_width=True, hide_index=True)
-        else:
-            st.caption("No past decisions yet.")

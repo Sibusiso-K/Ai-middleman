@@ -14,14 +14,5 @@ CREATE TABLE IF NOT EXISTS introduction_requests (
     notes TEXT
 );
 
-CREATE TABLE IF NOT EXISTS conversation_state (
-    id SERIAL PRIMARY KEY,
-    sender_number VARCHAR(20) NOT NULL,
-    last_matches JSONB,
-    last_query TEXT,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_conv_state_sender ON conversation_state(sender_number);
 CREATE INDEX IF NOT EXISTS idx_intro_requests_status ON introduction_requests(status);
 CREATE INDEX IF NOT EXISTS idx_intro_requests_requester ON introduction_requests(requester_number);
