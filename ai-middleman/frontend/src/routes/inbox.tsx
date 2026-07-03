@@ -1,10 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Card } from "@/components/ui-bits";
+import { Card, SectionHeader } from "@/components/ui-bits";
 import { AUDIT_LOG } from "@/lib/mock-data";
 import { api, type ThreadEvent } from "@/lib/api";
-import { Check, Pencil, X, Search, Sparkles, History, Send, Paperclip, Mic, Square } from "lucide-react";
+import { usePipelineFeed, PipelineFlowCompact, PipelineFeed } from "@/components/pipeline-viz";
+import { Check, Pencil, X, Sparkles, History, Send, Paperclip, Mic, Square } from "lucide-react";
 
 export const Route = createFileRoute("/inbox")({
   head: () => ({ meta: [{ title: "Inbox · AI Middleman" }] }),
@@ -57,6 +58,7 @@ function InboxPage() {
   const events = threadQuery.data?.events ?? [];
   const draft = lastDraft(events);
   const pending = isPending(events);
+  const pipeline = usePipelineFeed();
 
   function handleFileChosen(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -120,30 +122,17 @@ function InboxPage() {
         </div>
       ) : (
         <div className="flex-1 min-h-0 px-6 pb-6 grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-4">
-          {/* Single Sam<->Alex thread — this system runs one friend/Alex thread, not a multi-contact inbox */}
+          {/* Live pipeline — shown side-by-side with the conversation for demos */}
           <Card className="flex flex-col min-h-0 overflow-hidden">
-            <div className="p-3 border-b border-border space-y-2">
-              <div className="relative">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <input placeholder="Search threads" disabled className="w-full h-9 pl-9 pr-3 rounded-xl bg-muted text-sm focus:outline-none opacity-60" />
+            <div className="p-3 border-b border-border">
+              <SectionHeader title="Live Pipeline" subtitle="What the server is doing right now" />
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              <PipelineFlowCompact active={pipeline.active} />
+              <div className="px-3 pb-3">
+                <PipelineFeed events={pipeline.events} compact />
               </div>
             </div>
-            <ul className="flex-1 overflow-y-auto">
-              <li>
-                <div className="w-full text-left p-3 border-b border-border/60 flex gap-3 bg-accent/60">
-                  <div className="w-9 h-9 rounded-xl bg-primary-soft text-primary-soft-foreground grid place-items-center text-xs font-semibold shrink-0">SA</div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <div className="font-medium text-sm truncate flex-1">Sam → Alex</div>
-                    </div>
-                    <div className="text-xs text-muted-foreground truncate">
-                      {threadQuery.isLoading ? "Loading…" : threadQuery.isError ? "Connection error" : events.length ? "Live thread" : "No messages yet"}
-                    </div>
-                  </div>
-                  {pending && <span className="w-5 h-5 shrink-0 rounded-full bg-primary-soft text-primary-soft-foreground text-[10px] font-semibold grid place-items-center">1</span>}
-                </div>
-              </li>
-            </ul>
           </Card>
 
           {/* Conversation */}

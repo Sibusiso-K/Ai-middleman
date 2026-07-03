@@ -24,7 +24,8 @@
       "name": "frontend",
       "runtimeExecutable": "cmd.exe",
       "runtimeArgs": ["/c", "ai-middleman\\frontend\\run-dev.cmd"],
-      "port": 5174
+      "port": 5174,
+      "autoPort": true
     }
   ]
 }
