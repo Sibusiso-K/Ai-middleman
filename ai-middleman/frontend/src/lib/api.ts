@@ -103,5 +103,12 @@ export const api = {
   match: (query: string) => post<MatchResult>("/match", { query }),
   friendThread: () => request<{ thread_id: number; events: ThreadEvent[] }>("/friend/thread"),
   friendSend: (text: string) => post<{ status: string } | { error: string }>("/friend/send", { text }),
+  friendSendMedia: async (file: File | Blob, filename: string): Promise<{ status: string } | { error: string }> => {
+    const form = new FormData();
+    form.append("file", file, filename);
+    const res = await fetch(`${API_BASE}/friend/send-media`, { method: "POST", body: form });
+    if (!res.ok) throw new Error(`/friend/send-media -> ${res.status}`);
+    return res.json();
+  },
   health: () => request<{ status: string }>("/health"),
 };

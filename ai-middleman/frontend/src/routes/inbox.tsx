@@ -1,10 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card } from "@/components/ui-bits";
 import { AUDIT_LOG } from "@/lib/mock-data";
 import { api, type ThreadEvent } from "@/lib/api";
-import { Check, Pencil, X, Search, Sparkles, History, Send } from "lucide-react";
+import { Check, Pencil, X, Search, Sparkles, History, Send, Paperclip, Mic, Square } from "lucide-react";
 
 export const Route = createFileRoute("/inbox")({
   head: () => ({ meta: [{ title: "Inbox · AI Middleman" }] }),
@@ -24,12 +24,18 @@ function isPending(events: ThreadEvent[]) {
 function InboxPage() {
   const [tab, setTab] = useState<"threads" | "audit">("threads");
   const [text, setText] = useState("");
+  const [isRecording, setIsRecording] = useState(false);
+  const [mediaError, setMediaError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
   const queryClient = useQueryClient();
 
   const threadQuery = useQuery({
     queryKey: ["friend-thread"],
     queryFn: api.friendThread,
-    refetchInterval: 4000,
+    refetchInterval: 2000,
+    retry: 2,
   });
   const sendMutation = useMutation({
     mutationFn: (t: string) => api.friendSend(t),
@@ -38,10 +44,50 @@ function InboxPage() {
       queryClient.invalidateQueries({ queryKey: ["friend-thread"] });
     },
   });
+  const sendMediaMutation = useMutation({
+    mutationFn: ({ file, filename }: { file: File | Blob; filename: string }) => api.friendSendMedia(file, filename),
+    onSuccess: (result) => {
+      if ("error" in result) setMediaError(result.error);
+      else setMediaError(null);
+      queryClient.invalidateQueries({ queryKey: ["friend-thread"] });
+    },
+    onError: (e: Error) => setMediaError(e.message),
+  });
 
   const events = threadQuery.data?.events ?? [];
   const draft = lastDraft(events);
   const pending = isPending(events);
+
+  function handleFileChosen(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) sendMediaMutation.mutate({ file, filename: file.name });
+    e.target.value = "";
+  }
+
+  async function toggleRecording() {
+    if (isRecording) {
+      mediaRecorderRef.current?.stop();
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recordedChunksRef.current = [];
+      const recorder = new MediaRecorder(stream);
+      recorder.ondataavailable = (e) => recordedChunksRef.current.push(e.data);
+      recorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        setIsRecording(false);
+        const blob = new Blob(recordedChunksRef.current, { type: "audio/webm" });
+        sendMediaMutation.mutate({ file: blob, filename: "voice.webm" });
+      };
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setIsRecording(true);
+      setMediaError(null);
+    } catch (e) {
+      setMediaError(e instanceof Error ? e.message : "Mic access denied or unavailable");
+    }
+  }
 
   return (
     <div className="h-[calc(100vh-3.5rem)] flex flex-col">
@@ -91,7 +137,7 @@ function InboxPage() {
                       <div className="font-medium text-sm truncate flex-1">Sam → Alex</div>
                     </div>
                     <div className="text-xs text-muted-foreground truncate">
-                      {threadQuery.isLoading ? "Loading…" : events.length ? "Live thread" : "No messages yet"}
+                      {threadQuery.isLoading ? "Loading…" : threadQuery.isError ? "Connection error" : events.length ? "Live thread" : "No messages yet"}
                     </div>
                   </div>
                   {pending && <span className="w-5 h-5 shrink-0 rounded-full bg-primary-soft text-primary-soft-foreground text-[10px] font-semibold grid place-items-center">1</span>}
@@ -112,25 +158,38 @@ function InboxPage() {
             <div className="flex-1 overflow-y-auto p-6 space-y-3 bg-surface-2/40">
               {threadQuery.isLoading ? (
                 <div className="text-sm text-muted-foreground text-center py-8">Loading conversation…</div>
+              ) : threadQuery.isError ? (
+                <div className="text-sm text-destructive text-center py-8">
+                  Could not reach the API ({(threadQuery.error as Error)?.message ?? "unknown error"}).
+                  <button onClick={() => threadQuery.refetch()} className="block mx-auto mt-2 underline">Retry</button>
+                </div>
               ) : events.length === 0 ? (
                 <div className="text-sm text-muted-foreground text-center py-8">No messages yet — send one below to kick off the pipeline.</div>
               ) : (
-                events
-                  .filter((e) => ["friend_message", "alex_reply"].includes(e.event_type))
-                  .map((e) => {
-                    const fromUs = e.event_type === "friend_message";
-                    const text = e.payload.text ?? "";
-                    return (
-                      <div key={e.id} className={`flex ${fromUs ? "justify-end" : "justify-start"}`}>
-                        <div className={`max-w-[70%] rounded-2xl px-3.5 py-2 text-sm ${fromUs ? "bg-primary-soft text-primary-soft-foreground rounded-br-md" : "bg-surface rounded-bl-md shadow-soft"}`}>
-                          {text}
-                          <div className="text-[10px] opacity-60 mt-1 text-right">{new Date(e.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
-                        </div>
+                events.map((e, i) => {
+                  const bubble = (fromUs: boolean, content: string) => (
+                    <div key={e.id} className={`flex ${fromUs ? "justify-end" : "justify-start"}`}>
+                      <div className={`max-w-[70%] rounded-2xl px-3.5 py-2 text-sm whitespace-pre-wrap ${fromUs ? "bg-primary-soft text-primary-soft-foreground rounded-br-md" : "bg-surface rounded-bl-md shadow-soft"}`}>
+                        {content}
+                        <div className="text-[10px] opacity-60 mt-1 text-right">{new Date(e.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
                       </div>
-                    );
-                  })
+                    </div>
+                  );
+                  if (e.event_type === "friend_message") return bubble(true, e.payload.text ?? "");
+                  if (e.event_type === "alex_reply") return bubble(false, e.payload.text ?? "");
+                  if (e.event_type === "draft_sent") return bubble(false, e.payload.final_text ?? "");
+                  if (e.event_type === "draft_skipped")
+                    return <div key={e.id} className="text-xs text-muted-foreground text-center italic">— Alex skipped a suggested reply —</div>;
+                  if (e.event_type === "draft_suggested" && !events.some((ev, j) => j > i && ["draft_sent", "draft_edited", "draft_skipped"].includes(ev.event_type)))
+                    return <div key={e.id} className="text-xs text-muted-foreground text-center">⏳ Alex has a suggested reply pending on his WhatsApp…</div>;
+                  return null;
+                })
               )}
             </div>
+
+            {mediaError && (
+              <div className="px-4 py-2 text-xs text-destructive bg-destructive/10 border-t border-border">{mediaError}</div>
+            )}
 
             {draft && pending ? (
               <div className="p-4 border-t border-border">
@@ -153,6 +212,25 @@ function InboxPage() {
             ) : null}
 
             <div className="p-3 border-t border-border flex gap-2">
+              <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChosen} />
+              <button
+                type="button"
+                title="Send an image"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={sendMediaMutation.isPending}
+                className="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-muted text-foreground disabled:opacity-60 shrink-0"
+              >
+                <Paperclip className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                title={isRecording ? "Stop recording" : "Record a voice note"}
+                onClick={toggleRecording}
+                disabled={sendMediaMutation.isPending}
+                className={`inline-flex items-center justify-center w-10 h-10 rounded-xl shrink-0 disabled:opacity-60 ${isRecording ? "bg-destructive text-destructive-foreground" : "bg-muted text-foreground"}`}
+              >
+                {isRecording ? <Square className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+              </button>
               <input
                 value={text}
                 onChange={(e) => setText(e.target.value)}
