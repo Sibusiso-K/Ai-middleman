@@ -9,9 +9,10 @@
     },
     {
       "name": "dashboard",
-      "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "streamlit", "run", "ai-middleman/dashboard/app.py", "--server.port", "8501"],
-      "port": 8501
+      "runtimeExecutable": "cmd.exe",
+      "runtimeArgs": ["/c", "ai-middleman\\dashboard\\run-dev.cmd"],
+      "port": 8501,
+      "autoPort": true
     },
     {
       "name": "web",
