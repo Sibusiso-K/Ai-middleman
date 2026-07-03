@@ -5,15 +5,20 @@ The friend dashboard posts here to role-play Sam. Each send:
   1. records a friend_message event on the single Sam<->Alex thread,
   2. relays the text to Alex's real WhatsApp (send FROM our Cloud API number
      650746242 TO Alex 736013348) so it shows up in his 650746242 chat,
-  3. runs the intent/matching/draft pipeline, and if it's a contact request,
-     pushes Alex a clearly-marked draft with Send/Skip interactive buttons and
-     records a draft_suggested event.
+  3a. if it looks like a follow-up asking for the last-matched contact's
+      details (phone/email), looks that contact up and pushes Alex a
+      Send/Skip-gated draft with the actual details — revealing PII still
+      requires his approval, it just doesn't need a fresh matching pass;
+  3b. otherwise runs the intent/matching/draft pipeline, and if it's a
+      contact request, pushes Alex a clearly-marked draft with Send/Skip
+      interactive buttons and records a draft_suggested event.
 
 The dashboard then polls GET /friend/thread to render the conversation and any
 replies Alex sends back (which arrive via the webhook as alex_reply / draft_*).
 """
 
 import os
+import re
 from fastapi import APIRouter, Request, BackgroundTasks
 from dotenv import load_dotenv
 from pathlib import Path
@@ -32,6 +37,66 @@ router = APIRouter()
 ALEX_NUMBER = os.getenv("ALEX_WHATSAPP_NUMBER", "27736013348")
 FRIEND_NAME = os.getenv("FRIEND_SIM_NAME", "Sam")
 
+# Fast, LLM-free detector for "send me their details" follow-ups — no need to
+# wait on an intent-classifier round trip for a pattern this unambiguous.
+_DETAILS_REQUEST_RE = re.compile(
+    r"\b(send|share|give|forward)\b.{0,25}\b(detail|contact|number|phone|email|info)"
+    r"|\b(their|his|her)\s+(detail|contact|number|phone|email)",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_details_request(text: str) -> bool:
+    return bool(_DETAILS_REQUEST_RE.search(text))
+
+
+async def _handle_details_request(db_pool, thread_id: int, text: str, whatsapp: "WhatsAppClient") -> bool:
+    """
+    If this looks like a follow-up asking for the last-matched contact's
+    details, look them up and push a Send/Skip-gated draft containing the
+    actual phone/email to Alex. Returns True if handled (caller should not
+    also run the full matching pipeline).
+    """
+    if not _looks_like_details_request(text):
+        return False
+
+    manager = ConversationManager(db_pool)
+    match = await manager.get_last_sent_match(thread_id)
+    if not match or not match.get("contact_id"):
+        return False  # nothing to resolve — fall through to normal pipeline
+
+    async with db_pool.acquire() as conn:
+        contact = await conn.fetchrow(
+            "SELECT full_name, phone, email FROM contacts WHERE id = $1",
+            match["contact_id"],
+        )
+    if not contact or not (contact["phone"] or contact["email"]):
+        return False
+
+    details_lines = " / ".join(filter(None, [
+        f"📞 {contact['phone']}" if contact["phone"] else None,
+        f"📧 {contact['email']}" if contact["email"] else None,
+    ]))
+    first_name = contact["full_name"].split()[0] if contact["full_name"] else "them"
+    draft = f"Here's {first_name} for you — {details_lines}. Tell {first_name} I sent you 🤝"
+
+    event_id = await manager.add_event(thread_id, "draft_suggested", {
+        "original_message": text,
+        "draft_reply": draft,
+        "matches": [match],
+    })
+    buttons = [
+        {"type": "reply", "reply": {"id": f"send_{event_id}", "title": "✅ Send"}},
+        {"type": "reply", "reply": {"id": f"skip_{event_id}", "title": "❌ Skip"}},
+    ]
+    draft_body = (
+        f"🤖 *{FRIEND_NAME} is asking for {contact['full_name']}'s contact details*\n\n"
+        f"*Draft:*\n{draft}\n\n"
+        f"Tap Send to share it, or Skip to hold off."
+    )
+    await whatsapp.send_interactive_buttons(to=ALEX_NUMBER, body_text=draft_body, buttons=buttons)
+    return True
+
 
 async def _process_sam_message(db_pool, thread_id: int, text: str):
     """Relay Sam's message to Alex and run the intent/matching/draft pipeline.
@@ -42,6 +107,12 @@ async def _process_sam_message(db_pool, thread_id: int, text: str):
 
     # Relay to Alex's WhatsApp as plain text (reads like a normal conversation).
     await whatsapp.send_message(to=ALEX_NUMBER, text=text)
+
+    # A "send their details" follow-up is handled directly against the last
+    # match — no need to reclassify/rematch, and it still requires Alex's
+    # approval before any phone/email goes out.
+    if await _handle_details_request(db_pool, thread_id, text, whatsapp):
+        return
 
     # Fail OPEN if the classifier is unreachable, so a genuine ask is never dropped.
     classifier = IntentClassifier()

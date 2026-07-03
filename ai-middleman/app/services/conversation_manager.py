@@ -64,6 +64,33 @@ class ConversationManager:
             e['payload'] = json.loads(e['payload']) if isinstance(e['payload'], str) else e['payload']
         return events
 
+    async def get_last_sent_match(self, thread_id: int) -> Optional[dict]:
+        """
+        Return the single match that was actually delivered to the friend in
+        the most recent resolved draft_suggested event — used to answer
+        follow-ups like "send me her details" without re-running the matcher.
+        Falls back to the top-confidence match if the delivered text doesn't
+        clearly identify which one was used (e.g. it was edited).
+        """
+        async with self.db_pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT payload FROM thread_events
+                WHERE thread_id = $1 AND event_type = 'draft_suggested'
+                ORDER BY created_at DESC LIMIT 1
+            """, thread_id)
+        if not row:
+            return None
+        payload = json.loads(row['payload']) if isinstance(row['payload'], str) else row['payload']
+        matches = payload.get('matches') or []
+        if not matches:
+            return None
+        sent_text = payload.get('draft_reply', '') or ''
+        for m in matches:
+            name = m.get('name', '')
+            if name and name in sent_text:
+                return m
+        return matches[0]  # highest-confidence match as fallback
+
     async def get_last_matches(self, thread_id: int) -> Optional[List[dict]]:
         """
         Return the match list from the most recent draft_suggested event,

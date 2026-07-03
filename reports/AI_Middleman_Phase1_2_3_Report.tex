@@ -27,7 +27,7 @@
 \pagestyle{fancy}
 \fancyhf{}
 \rhead{AI Middleman --- Technical Report}
-\lhead{Phase 1, 2 \& 3}
+\lhead{Phase 1--3 \& Prompt 3}
 \rfoot{Page \thepage}
 
 % Hyperlink styling
@@ -114,7 +114,7 @@
     \vspace{0.5cm}
     {\Large Contact Matching System\par}
     \vspace{0.5cm}
-    {\large Technical Report --- Phase 1, 2 \& 3\par}
+    {\large Technical Report --- Phase 1--3 \& Prompt 3\par}
     \vspace{2cm}
     \rule{\textwidth}{0.5pt}
     \vspace{1cm}
@@ -122,11 +122,11 @@
     \vspace{1cm}
     \rule{\textwidth}{0.5pt}
     \vspace{2cm}
-    {\large Document Version: 2.0\par}
+    {\large Document Version: 3.0\par}
     \vspace{0.3cm}
     {\large Date: \today\par}
     \vspace{0.3cm}
-    {\large Status: Phase 1, 2 \& 3 Complete\par}
+    {\large Status: Phase 1--3 Complete; Prompt 3 (Dashboard Redesign \& Friend Simulator) Complete\par}
     \vspace{3cm}
 \end{titlepage}
 
@@ -1901,6 +1901,84 @@ At no point before step 4 does the user see any identifying information. The mid
 \end{table}
 
 %=====================================================================
+\chapter{Prompt 3: Dashboard-Based Redesign \& Friend-Simulator}
+%=====================================================================
+
+\section{Motivation}
+
+The Prompt 2 privacy layer (previous chapter) introduced a numeric-reply selection flow (``Reply with 1, 2, 3\ldots'') and a Streamlit ``Pending Approvals'' page wired to an \texttt{introduction\_requests} table. A fresh diagnosis at the start of this phase found that flow was \textbf{never actually connected to the live webhook} --- the migration and dashboard page existed, but no code path in \texttt{whatsapp\_webhook.py} ever wrote to \texttt{introduction\_requests}. In practice the system had been running a simpler, undocumented flow the whole time: every contact request produced one AI-drafted reply, sent to the middleman (Alex) via WhatsApp interactive buttons (SEND/EDIT/SKIP), with no formal per-contact approval step and no multi-turn memory --- each new request from a sender overwrote the previous one in \texttt{conversation\_state}.
+
+The goal of this phase was to close that gap properly: give Alex a real control surface, support multi-turn conversations (``connect me with the second one''), and --- once the target workflow was clarified with the project owner --- let the same person test the full loop themselves by role-playing the friend from a browser dashboard, without needing a second physical phone.
+
+\section{Corrected Phone-Number Role Model}
+
+This project has had recurring confusion about which WhatsApp number plays which role. The authoritative model, confirmed against the Meta developer console:
+
+\begin{itemize}[itemsep=3pt]
+    \item \textbf{27650746242} --- the \emph{Cloud API} number. It owns the \texttt{phone\_number\_id}, the webhook callback URL, and the access token. A Cloud API number \emph{cannot} simultaneously be used as a normal consumer WhatsApp app --- this is a Meta platform constraint, not a design choice.
+    \item \textbf{27736013348} --- Alex's real, personal WhatsApp account, used on \texttt{web.whatsapp.com} like any normal user.
+    \item The only live channel between the system and Alex is therefore \texttt{650746242} $\leftrightarrow$ \texttt{736013348}. The friend-simulator dashboard drives the Cloud API side (``plays'' the friend, called Sam in testing) by sending \emph{from} 650746242 \emph{to} Alex's real number.
+\end{itemize}
+
+\section{Multi-Turn Thread Model}
+
+\texttt{conversation\_state} (one JSONB row per sender, overwritten on every new request) was replaced with a proper thread/event log:
+
+\begin{itemize}[itemsep=3pt]
+    \item \textbf{\texttt{threads}} --- one row per conversation (keyed by sender number), holding an \texttt{autonomy\_mode} flag (\texttt{manual} / \texttt{autonomous}) for future use.
+    \item \textbf{\texttt{thread\_events}} --- an ordered, append-only log of every turn: \texttt{friend\_message}, \texttt{draft\_suggested}, \texttt{draft\_sent}, \texttt{draft\_edited}, \texttt{draft\_skipped}, and \texttt{alex\_reply}.
+\end{itemize}
+
+This unlocks follow-up resolution: a message containing an ordinal reference (``the second one'', ``\#2'') is checked against the most recent \texttt{draft\_suggested} event's match list before falling back to a fresh matching pass, so multi-turn requests are handled without re-running the pipeline. \texttt{match\_history}, \texttt{conversation\_state}, and \texttt{introduction\_requests} remain in the schema for backward compatibility but are no longer written to by the live code path.
+
+\section{Friend-Simulator Dashboard}
+
+A new Streamlit page, \emph{Friend --- Sam}, gives the tester a two-way WhatsApp-style chat interface:
+
+\begin{enumerate}[itemsep=3pt]
+    \item Typing a message as Sam calls \texttt{POST /friend/send}. The endpoint persists a \texttt{friend\_message} event and returns immediately (see the latency fix in Section~\ref{sec:latency-fix}); a background task relays the text to Alex's real WhatsApp \emph{as plain text} (no bot-style prefix, so it reads like a genuine message) and runs the intent/matching/draft pipeline.
+    \item If the message is a contact request, Alex receives a clearly marked draft on WhatsApp with \textbf{Send}/\textbf{Skip} interactive buttons --- unchanged in spirit from the original SEND/EDIT/SKIP flow, just re-scoped to per-draft buttons instead of a single global pending slot.
+    \item Alex's replies (button taps, typed \texttt{SEND}/\texttt{EDIT~<text>}/\texttt{SKIP}, or ordinary free-text chat) arrive via the same webhook and are logged back onto the thread as \texttt{draft\_sent}/\texttt{draft\_edited}/\texttt{draft\_skipped}/\texttt{alex\_reply} events.
+    \item The dashboard live-polls \texttt{GET /friend/thread} and renders the full conversation from Sam's side, so Alex's replies appear back in the browser automatically.
+\end{enumerate}
+
+The pre-existing \emph{Live Threads} dashboard page was kept but demoted to read-only monitoring, since draft approval now happens on Alex's actual WhatsApp rather than in a second dashboard UI.
+
+\section{Reliability Hardening}
+
+Three separate Featherless.ai LLM calls (intent classification, match ranking, draft generation) previously had short, single-attempt timeouts and silently swallowed failures as ``no'' / ``no match''. Under real load this dropped genuine requests without any trace. All three were hardened uniformly:
+
+\begin{itemize}[itemsep=3pt]
+    \item Configurable per-call timeout (30--45s) and retry count (2--3 attempts) with linear backoff, covering both timeouts and \texttt{5xx}/\texttt{429} responses.
+    \item The matching agent's JSON parser now tolerates markdown code fences and prose-wrapped responses (\texttt{\`\`\`json ... \`\`\`}, ``Sure, here's the result: \{...\}''), fixing intermittent ``Expecting value'' crashes.
+    \item The intent classifier now raises a typed \texttt{IntentClassificationError} on terminal failure instead of returning \texttt{False} --- the caller explicitly \emph{fails open} (treats an unclassifiable message as a request) so a real ask is never silently dropped, with a note appended to Alex's draft when this happens.
+\end{itemize}
+
+The webhook handler was also hardened to parse the inbound body defensively --- a malformed or non-UTF-8 payload now returns \texttt{200 \{"status": "ignored"\}} instead of a \texttt{500}, preventing Meta's delivery retries from retry-storming a broken request.
+
+\section{Development Tunnel Fix}
+
+\texttt{dev\_tunnel.py} previously called \texttt{ngrok.connect(8000)}, which allocates a random \texttt{*.ngrok-free.dev} URL on every run --- this never matched the reserved domain already configured as the Meta webhook Callback URL, so inbound webhooks silently had nowhere to go. The script now binds the reserved domain explicitly (\texttt{ngrok.connect(addr=8000, domain=\ldots)}), confirmed live end-to-end: a request to the public reserved URL now round-trips through ngrok, uvicorn, and the webhook handler back into the thread log.
+
+\subsection{Latency and UX Fixes}
+\label{sec:latency-fix}
+
+Two usability issues surfaced during live testing with the project owner:
+
+\begin{enumerate}[itemsep=3pt]
+    \item \textbf{5--10 second input delay.} \texttt{POST /friend/send} was running the WhatsApp relay \emph{and} the full intent/matching/draft pipeline synchronously before responding, so the dashboard appeared to hang on every message. The slow work was moved into a FastAPI \texttt{BackgroundTasks} job; the endpoint now persists the event and returns in $\sim$0.2s (measured, down from 5--10s), and the transcript poll interval was reduced to 1s.
+    \item \textbf{Silent relay failures on Windows.} A conversation-tracing \texttt{print()} statement containing emoji (\texttt{💬}, \texttt{→}) raised \texttt{UnicodeEncodeError} on Windows' \texttt{cp1252} console encoding, crashing the request \emph{after} the message was saved to the thread but \emph{before} it was relayed to Alex --- explaining reports of ``Sam's message shows in the dashboard but never reaches Alex's phone.'' A small \texttt{slog()} helper (\texttt{app/log\_safe.py}) now falls back to a replaced-character encoding rather than raising, and all conversation-log call sites were routed through it.
+\end{enumerate}
+
+\section{Contact-Details Follow-Up}
+
+A natural next step after a successful match --- ``seems good, please send her details'' --- previously fell through to the generic pipeline with no useful outcome. A lightweight, regex-based detector (\texttt{\_looks\_like\_details\_request}) now recognises this pattern without an extra LLM round trip, resolves the contact from the most recently \emph{delivered} match on the thread (\texttt{get\_last\_sent\_match}), looks up their phone/email, and pushes a Send/Skip-gated draft to Alex containing the real contact details. Revealing PII still requires Alex's explicit approval tap, consistent with the privacy model established in the Prompt 2 chapter --- the shortcut only skips re-running the matcher, not the approval gate.
+
+\section{Verification}
+
+The full loop was exercised against real infrastructure rather than mocks: a genuine message typed into the friend-simulator dashboard was delivered to Alex's real WhatsApp account, a real AI-generated draft with interactive buttons was received and tapped on his phone, and the resulting reply flowed back through the live ngrok tunnel into the dashboard's chat view --- confirmed via direct database inspection of the \texttt{thread\_events} log and by observing genuine Meta-origin webhook deliveries (\texttt{2a03:2880:\ldots} source addresses) in the server log.
+
+%=====================================================================
 \chapter{Conclusion}
 %=====================================================================
 
@@ -1914,15 +1992,17 @@ AI Middleman has progressed from concept to a fully functional WhatsApp-integrat
     \item Has processed 22+ real WhatsApp messages end-to-end with 100\% success rate.
     \item Passes all 16 unit tests covering keyword extraction, response formatting, and pipeline integration.
     \item Produces accurate, location-aware contact rankings with dynamic confidence scores and detailed reasoning.
-    \item Protects contact privacy with a two-gate system: anonymous reference codes in search results, and middleman-approved introduction requests before any identifying information is shared.
-    \item Provides a Streamlit dashboard for the middleman to review and approve/reject introduction requests, with automatic WhatsApp notifications upon decision.
+    \item Protects contact privacy with an approval gate: matched contacts' identifying details (phone/email) are only ever shared with the requester after Alex explicitly approves the specific draft on WhatsApp.
+    \item Maintains full multi-turn conversation history per thread (\texttt{threads} / \texttt{thread\_events}), enabling follow-up references (``the second one'') and natural post-match requests (``send me her details'') without re-running the matching pipeline.
+    \item Provides a friend-simulator dashboard for end-to-end testing --- a two-way chat that role-plays the requester over real WhatsApp, so the entire loop can be validated by one person without a second physical phone.
+    \item Runs all outbound LLM calls (intent classification, match ranking, draft generation) with retries, backoff, and tolerant JSON parsing, so transient upstream slowness no longer silently drops genuine requests.
 \end{itemize}
 
 The architectural decisions---PostgreSQL over MongoDB, raw SQL over ORM, Featherless.ai free tier over paid APIs, regex keyword filter over vector embeddings, no LangChain---were each made with specific, documented reasoning. The result is a system that is simple, fast, cheap, and explainable.
 
 A post-Phase-3 matching accuracy fix resolved three critical issues: the LLM agent was being completely bypassed by the matching engine, the LLM prompt lacked specific scoring guidance, and the keyword filter had no location-awareness. After the fix, contact rankings are properly prioritised by location, role relevance, and seniority, with dynamic confidence scores and detailed reasoning.
 
-The Prompt 2 privacy layer added a complete introduction request workflow: anonymous search results with reference codes, a contact selection flow via numeric replies, a pending approvals dashboard, and automatic WhatsApp notifications with full contact details upon middleman approval. This ensures the contact database cannot be scraped through the WhatsApp interface and the middleman retains full control over introductions.
+The Prompt 2 privacy layer added an anonymised-search-result flow (\texttt{Ref: C-XXXX} codes) and an \texttt{introduction\_requests} approval table; a subsequent audit found this flow was never actually wired into the live webhook, and the system had in practice been running on the simpler SEND/EDIT/SKIP draft-approval path the whole time. Prompt 3 closed that gap: it replaced the single-overwritten \texttt{conversation\_state} row with a proper multi-turn thread/event log, clarified and corrected the phone-number role model (the Cloud API number and Alex's personal WhatsApp cannot be the same number), added the friend-simulator dashboard for self-contained testing, hardened all LLM calls and the webhook body parser against transient failures, fixed the ngrok development tunnel to bind its reserved domain, resolved a Windows console encoding bug that was silently breaking message relays, cut dashboard-perceived latency from 5--10s to under 0.3s, and added an approval-gated ``send their details'' follow-up. The full loop --- friend message in, real WhatsApp draft to Alex, his approval tap, reply back to the friend --- has been verified against live infrastructure, not mocks.
 
 Phase 4 will take this working system to production, replacing the ngrok development tunnel with a proper domain and SSL on Oracle Cloud, adding monitoring and backups, and hardening the security configuration.
 
