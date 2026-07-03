@@ -22,7 +22,7 @@ replies Alex sends back (which arrive via the webhook as alex_reply / draft_*).
 
 import os
 import re
-from fastapi import APIRouter, Request, BackgroundTasks
+from fastapi import APIRouter, Request, BackgroundTasks, UploadFile, File
 from dotenv import load_dotenv
 from pathlib import Path
 
@@ -219,6 +219,20 @@ async def _process_sam_message(db_pool, thread_id: int, text: str):
     )
 
 
+async def _queue_sam_text(db_pool, background: BackgroundTasks, text: str) -> dict:
+    """Shared by /friend/send and /friend/send-media: save the message and
+    hand the slow relay+pipeline work to a background task."""
+    manager = ConversationManager(db_pool)
+    thread = await manager.get_or_create_thread(ALEX_NUMBER)
+    thread_id = thread["id"]
+
+    await manager.add_event(thread_id, "friend_message", {"text": text})
+    slog(f"[chat] {FRIEND_NAME} -> Alex: {text}")
+    emit("received", f"📩 {FRIEND_NAME} says: \"{text}\"")
+    background.add_task(_process_sam_message, db_pool, thread_id, text)
+    return {"status": "queued"}
+
+
 @router.post("/friend/send")
 async def friend_send(request: Request, background: BackgroundTasks):
     """Record Sam's message and return immediately; the relay + LLM pipeline run
@@ -228,19 +242,39 @@ async def friend_send(request: Request, background: BackgroundTasks):
     text = (body.get("text") or "").strip()
     if not text:
         return {"error": "text is required"}
+    return await _queue_sam_text(db_pool, background, text)
 
-    manager = ConversationManager(db_pool)
-    thread = await manager.get_or_create_thread(ALEX_NUMBER)
-    thread_id = thread["id"]
 
-    # Save the message synchronously so it renders on the next poll (~1s), then
-    # hand the slow work (WhatsApp relay + intent/matching/draft) to the background.
-    await manager.add_event(thread_id, "friend_message", {"text": text})
-    slog(f"[chat] {FRIEND_NAME} -> Alex: {text}")
-    emit("received", f"📩 {FRIEND_NAME} says: \"{text}\"")
-    background.add_task(_process_sam_message, db_pool, thread_id, text)
+@router.post("/friend/send-media")
+async def friend_send_media(request: Request, background: BackgroundTasks, file: UploadFile = File(...)):
+    """
+    Sam's voice-note/image upload. Transcribes (audio) or describes (image)
+    via Groq, then feeds the resulting text through the exact same pipeline
+    as a typed message — so a voice note asking for a lawyer triggers a
+    suggestion exactly like typing it would.
+    """
+    from app.services.groq_media import transcribe_audio, describe_image, MediaTranscriptionError
 
-    return {"status": "queued"}
+    db_pool = request.app.state.db_pool
+    content = await file.read()
+    content_type = (file.content_type or "").lower()
+
+    try:
+        if content_type.startswith("audio"):
+            transcript = await transcribe_audio(content, filename=file.filename or "voice.webm")
+            text = f"🎙️ {transcript}"
+        elif content_type.startswith("image"):
+            description = await describe_image(content, mime_type=content_type)
+            text = f"🖼️ {description}"
+        else:
+            return {"error": f"Unsupported content type: {content_type}"}
+    except MediaTranscriptionError as e:
+        return {"error": str(e)}
+
+    if not text.strip():
+        return {"error": "Transcription came back empty"}
+
+    return await _queue_sam_text(db_pool, background, text)
 
 
 @router.get("/friend/thread")

@@ -185,6 +185,35 @@ if page == "🧑 Friend — Sam":
 
     render_transcript()
 
+    # ── Voice note / image upload ──
+    # Both go to /friend/send-media, which transcribes (Whisper) or describes
+    # (vision) via Groq and feeds the result into the same pipeline as typed
+    # text. Track processed file_ids in session_state so a widget that stays
+    # populated across reruns doesn't get re-sent.
+    st.session_state.setdefault("sam_media_sent", set())
+    col_img, col_aud = st.columns(2)
+    with col_img:
+        uploaded_image = st.file_uploader(
+            "📎 Send an image", type=["png", "jpg", "jpeg", "webp"], key="sam_image_upload"
+        )
+    with col_aud:
+        uploaded_audio = st.audio_input("🎙️ Record a voice note", key="sam_audio_upload")
+
+    for uploaded in (uploaded_image, uploaded_audio):
+        if uploaded is None or uploaded.file_id in st.session_state.sam_media_sent:
+            continue
+        st.session_state.sam_media_sent.add(uploaded.file_id)
+        with st.spinner("Transcribing…"):
+            try:
+                files = {"file": (uploaded.name or "upload", uploaded.getvalue(), uploaded.type)}
+                r = requests.post(f"{API_URL}/friend/send-media", files=files, timeout=60)
+                data = r.json() if r.status_code == 200 else {"error": r.text}
+                if data.get("error"):
+                    st.error(f"Transcription failed: {data['error']}")
+            except Exception as e:
+                st.error(f"Upload failed: {e}")
+        st.rerun()
+
     # ── Input box ──
     prompt = st.chat_input("Message as Sam…")
     if prompt:

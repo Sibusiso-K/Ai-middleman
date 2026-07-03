@@ -137,10 +137,19 @@ async def route_message(db_pool, value: dict):
             await handle_button_reply(manager, thread_id, reply_id)
         return
 
-    if msg_type != "text":
+    # Resolve the message to plain text regardless of how it arrived — typed,
+    # voice note, or image — so everything downstream (commands, alex_reply)
+    # works identically either way.
+    text = None
+    if msg_type == "text":
+        text = message["text"]["body"].strip()
+    elif msg_type in ("audio", "image"):
+        text = await _transcribe_media(message, msg_type)
+        if text is None:
+            return  # transcription unavailable/failed — already logged
+    else:
         return
 
-    text = message["text"]["body"].strip()
     print(f"[Route] From Alex ({sender}): {text[:80]}")
 
     pending = await manager.get_latest_pending_draft(thread_id)
@@ -153,6 +162,31 @@ async def route_message(db_pool, value: dict):
     # Otherwise this is Alex chatting back to Sam in his own words.
     await manager.add_event(thread_id, "alex_reply", {"text": text})
     slog(f"[chat] Alex -> Sam: {text}")
+
+
+async def _transcribe_media(message: dict, msg_type: str) -> str | None:
+    """Download and transcribe/describe a voice note or image from Alex.
+    Returns the resulting text, or None if transcription isn't available."""
+    from app.services.whatsapp_client import WhatsAppClient
+    from app.services.groq_media import transcribe_audio, describe_image, MediaTranscriptionError
+
+    media_id = message.get(msg_type, {}).get("id")
+    if not media_id:
+        return None
+
+    try:
+        content, mime_type = await WhatsAppClient().download_media(media_id)
+        if msg_type == "audio":
+            text = await transcribe_audio(content)
+            print(f"[Media] Transcribed voice note: {text[:100]}")
+            return f"🎙️ {text}"
+        else:
+            text = await describe_image(content, mime_type)
+            print(f"[Media] Described image: {text[:100]}")
+            return f"🖼️ {text}"
+    except MediaTranscriptionError as e:
+        slog(f"[Media] Could not process {msg_type} from Alex: {e}")
+        return None
 
 
 async def handle_alex_command(manager, thread_id, text, pending):

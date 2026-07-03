@@ -17,16 +17,18 @@ from typing import Dict, Any, List
 from dotenv import load_dotenv
 from pathlib import Path
 
+from app.services.llm_provider import get_chat_config, using_groq
+
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 class LLMAgent:
     def __init__(self):
-        self.api_key = os.getenv("FEATHERLESS_API_KEY")
-        self.api_url = os.getenv(
-            "FEATHERLESS_API_URL", "https://api.featherless.ai/v1/chat/completions"
-        )
-        self.model = os.getenv("FEATHERLESS_MODEL", "NousResearch/Meta-Llama-3.1-8B-Instruct")
-        self.timeout = float(os.getenv("AGENT_TIMEOUT_SECONDS", "45"))
+        config = get_chat_config()
+        self.api_key = config["api_key"]
+        self.api_url = config["api_url"]
+        self.model = config["model"]
+        default_timeout = "15" if using_groq() else "45"
+        self.timeout = float(os.getenv("AGENT_TIMEOUT_SECONDS", default_timeout))
         self.max_retries = int(os.getenv("AGENT_MAX_ATTEMPTS", "3"))
 
     @staticmethod

@@ -13,21 +13,19 @@ from typing import List, Dict, Any
 from dotenv import load_dotenv
 from pathlib import Path
 
+from app.services.llm_provider import get_chat_config, using_groq
+
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 
 class DraftGenerator:
     def __init__(self):
-        self.api_key = os.getenv("FEATHERLESS_API_KEY") or os.getenv("OPENROUTER_API_KEY")
-        self.api_url = os.getenv(
-            "FEATHERLESS_API_URL",
-            "https://api.featherless.ai/v1/chat/completions"
-        )
-        self.model = os.getenv(
-            "FEATHERLESS_MODEL",
-            "NousResearch/Meta-Llama-3.1-8B-Instruct"
-        )
-        self.timeout = float(os.getenv("DRAFT_TIMEOUT_SECONDS", "30"))
+        config = get_chat_config()
+        self.api_key = config["api_key"]
+        self.api_url = config["api_url"]
+        self.model = config["model"]
+        default_timeout = "10" if using_groq() else "30"
+        self.timeout = float(os.getenv("DRAFT_TIMEOUT_SECONDS", default_timeout))
         self.max_attempts = int(os.getenv("DRAFT_MAX_ATTEMPTS", "3"))
 
     async def generate_draft(

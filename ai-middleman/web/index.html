@@ -71,6 +71,12 @@
     padding: 0 18px; font-size: 1rem; cursor: pointer;
   }
   button[type="submit"]:disabled { opacity: 0.5; }
+  #attachBtn, #micBtn {
+    background: #1c1f26; border: 1px solid #333844; color: #fafafa;
+    border-radius: 10px; width: 44px; font-size: 1.1rem; cursor: pointer; flex-shrink: 0;
+  }
+  #micBtn.recording { background: #ff6b6b; border-color: #ff6b6b; }
+  #uploadStatus { font-size: 0.72rem; color: #9aa0a6; padding: 0 12px 6px; text-align: center; }
 </style>
 </head>
 <body>
@@ -93,7 +99,11 @@
   </div>
   <button id="pipelineToggle" type="button">🔎 Pipeline status ▾</button>
 
+  <div id="uploadStatus"></div>
   <form id="composer">
+    <button type="button" id="attachBtn" title="Send an image">📎</button>
+    <button type="button" id="micBtn" title="Record a voice note">🎙️</button>
+    <input id="fileInput" type="file" accept="image/*" hidden />
     <input id="text" type="text" placeholder="Message as Sam…" autocomplete="off" />
     <button type="submit">Send</button>
   </form>
@@ -179,6 +189,61 @@ async function poll() {
     statusEl.className = "bad";
   }
 }
+
+// --- Image attach + voice note recording ---
+// Both upload to /friend/send-media, which transcribes (Whisper) or
+// describes (vision) via Groq, then feeds the result into the normal
+// pipeline exactly like a typed message.
+const uploadStatusEl = document.getElementById("uploadStatus");
+const fileInput = document.getElementById("fileInput");
+const attachBtn = document.getElementById("attachBtn");
+const micBtn = document.getElementById("micBtn");
+
+async function sendMedia(blob, filename) {
+  uploadStatusEl.textContent = "Uploading…";
+  const form = new FormData();
+  form.append("file", blob, filename);
+  try {
+    const res = await fetch(`${apiBase}/friend/send-media`, { method: "POST", body: form });
+    const data = await res.json();
+    uploadStatusEl.textContent = data.error ? `⚠️ ${data.error}` : "";
+  } catch (err) {
+    uploadStatusEl.textContent = `⚠️ Upload failed: ${err.message}`;
+  }
+  poll();
+}
+
+attachBtn.onclick = () => fileInput.click();
+fileInput.onchange = () => {
+  if (fileInput.files[0]) sendMedia(fileInput.files[0], fileInput.files[0].name);
+  fileInput.value = "";
+};
+
+let mediaRecorder = null;
+let recordedChunks = [];
+micBtn.onclick = async () => {
+  if (mediaRecorder && mediaRecorder.state === "recording") {
+    mediaRecorder.stop();
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    recordedChunks = [];
+    mediaRecorder = new MediaRecorder(stream);
+    mediaRecorder.ondataavailable = (e) => recordedChunks.push(e.data);
+    mediaRecorder.onstop = () => {
+      stream.getTracks().forEach((t) => t.stop());
+      micBtn.classList.remove("recording");
+      const blob = new Blob(recordedChunks, { type: "audio/webm" });
+      sendMedia(blob, "voice.webm");
+    };
+    mediaRecorder.start();
+    micBtn.classList.add("recording");
+    uploadStatusEl.textContent = "Recording… tap 🎙️ again to stop";
+  } catch (err) {
+    uploadStatusEl.textContent = `⚠️ Mic access denied or unavailable: ${err.message}`;
+  }
+};
 
 form.addEventListener("submit", async (ev) => {
   ev.preventDefault();

@@ -64,6 +64,25 @@ class WhatsAppClient:
             except Exception:
                 return {"raw_response": response.text}
 
+    async def download_media(self, media_id: str) -> tuple[bytes, str]:
+        """
+        Download a voice-note or image attachment from a WhatsApp message.
+        Meta's media API is two-step: look up the temporary CDN URL for the
+        media_id, then fetch the bytes from that URL (both need the access
+        token). Returns (content_bytes, mime_type).
+        """
+        headers = {"Authorization": f"Bearer {self.access_token}"}
+        async with httpx.AsyncClient(verify=_VERIFY, follow_redirects=True) as client:
+            meta_resp = await client.get(
+                f"https://graph.facebook.com/v21.0/{media_id}", headers=headers, timeout=15.0
+            )
+            meta_resp.raise_for_status()
+            meta = meta_resp.json()
+
+            media_resp = await client.get(meta["url"], headers=headers, timeout=30.0)
+            media_resp.raise_for_status()
+            return media_resp.content, meta.get("mime_type", "application/octet-stream")
+
     async def send_interactive_buttons(
         self,
         to: str,

@@ -12,6 +12,8 @@ import os
 from dotenv import load_dotenv
 from pathlib import Path
 
+from app.services.llm_provider import get_chat_config, using_groq
+
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 
@@ -23,18 +25,14 @@ class IntentClassificationError(Exception):
 
 class IntentClassifier:
     def __init__(self):
-        self.api_key = os.getenv("FEATHERLESS_API_KEY") or os.getenv("OPENROUTER_API_KEY")
-        self.api_url = os.getenv(
-            "FEATHERLESS_API_URL",
-            "https://api.featherless.ai/v1/chat/completions"
-        )
-        self.model = os.getenv(
-            "FEATHERLESS_MODEL",
-            "NousResearch/Meta-Llama-3.1-8B-Instruct"
-        )
-        # Featherless can run ~8-10s/call when warming up, so give each attempt
-        # generous headroom and retry a few times before giving up.
-        self.timeout = float(os.getenv("INTENT_TIMEOUT_SECONDS", "30"))
+        config = get_chat_config()
+        self.api_key = config["api_key"]
+        self.api_url = config["api_url"]
+        self.model = config["model"]
+        # Featherless can run ~8-10s/call when warming up; Groq is much faster
+        # but keep headroom for retries either way.
+        default_timeout = "10" if using_groq() else "30"
+        self.timeout = float(os.getenv("INTENT_TIMEOUT_SECONDS", default_timeout))
         self.max_attempts = int(os.getenv("INTENT_MAX_ATTEMPTS", "3"))
 
     async def is_contact_request(self, message: str) -> bool:
