@@ -14,7 +14,7 @@ replies Alex sends back (which arrive via the webhook as alex_reply / draft_*).
 """
 
 import os
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, BackgroundTasks
 from dotenv import load_dotenv
 from pathlib import Path
 
@@ -23,6 +23,7 @@ from app.services.matching_engine import MatchingEngine
 from app.services.draft_generator import DraftGenerator
 from app.services.conversation_manager import ConversationManager
 from app.services.whatsapp_client import WhatsAppClient
+from app.log_safe import slog
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
@@ -32,9 +33,65 @@ ALEX_NUMBER = os.getenv("ALEX_WHATSAPP_NUMBER", "27736013348")
 FRIEND_NAME = os.getenv("FRIEND_SIM_NAME", "Sam")
 
 
+async def _process_sam_message(db_pool, thread_id: int, text: str):
+    """Relay Sam's message to Alex and run the intent/matching/draft pipeline.
+    Runs as a background task so /friend/send returns instantly (the slow LLM
+    calls no longer block the dashboard)."""
+    manager = ConversationManager(db_pool)
+    whatsapp = WhatsAppClient()
+
+    # Relay to Alex's WhatsApp as plain text (reads like a normal conversation).
+    await whatsapp.send_message(to=ALEX_NUMBER, text=text)
+
+    # Fail OPEN if the classifier is unreachable, so a genuine ask is never dropped.
+    classifier = IntentClassifier()
+    classify_failed = False
+    try:
+        is_request = await classifier.is_contact_request(text)
+    except IntentClassificationError as e:
+        slog(f"[Friend] Intent classification unavailable, failing open: {e}")
+        is_request = True
+        classify_failed = True
+
+    if not is_request:
+        return
+
+    engine = MatchingEngine(db_pool)
+    result = await engine.match(text)
+    all_matches = result.get("matches", [])
+    viable = [m for m in all_matches if m.get("confidence", 0) >= 0.5]
+
+    generator = DraftGenerator()
+    draft = await generator.generate_draft(original_request=text, matches=viable)
+
+    event_id = await manager.add_event(thread_id, "draft_suggested", {
+        "original_message": text,
+        "draft_reply": draft,
+        "matches": all_matches,
+    })
+
+    buttons = [
+        {"type": "reply", "reply": {"id": f"send_{event_id}", "title": "✅ Send"}},
+        {"type": "reply", "reply": {"id": f"skip_{event_id}", "title": "❌ Skip"}},
+    ]
+    uncertain_note = (
+        "⚠️ _(couldn't auto-verify this was a request — sending a draft anyway)_\n\n"
+        if classify_failed else ""
+    )
+    draft_body = (
+        f"🤖 *Suggested reply to {FRIEND_NAME}*\n\n"
+        f"{uncertain_note}"
+        f"_{FRIEND_NAME} asked:_ {text}\n\n"
+        f"*Draft:* {draft}\n\n"
+        f"Tap Send to use it, or reply EDIT <your text>."
+    )
+    await whatsapp.send_interactive_buttons(to=ALEX_NUMBER, body_text=draft_body, buttons=buttons)
+
+
 @router.post("/friend/send")
-async def friend_send(request: Request):
-    """Send a message as the friend (Sam) into the system."""
+async def friend_send(request: Request, background: BackgroundTasks):
+    """Record Sam's message and return immediately; the relay + LLM pipeline run
+    in the background so the dashboard never waits on them."""
     db_pool = request.app.state.db_pool
     body = await request.json()
     text = (body.get("text") or "").strip()
@@ -42,73 +99,16 @@ async def friend_send(request: Request):
         return {"error": "text is required"}
 
     manager = ConversationManager(db_pool)
-    whatsapp = WhatsAppClient()
-
     thread = await manager.get_or_create_thread(ALEX_NUMBER)
     thread_id = thread["id"]
 
-    # 1. Record Sam's message on the thread.
+    # Save the message synchronously so it renders on the next poll (~1s), then
+    # hand the slow work (WhatsApp relay + intent/matching/draft) to the background.
     await manager.add_event(thread_id, "friend_message", {"text": text})
+    slog(f"[chat] {FRIEND_NAME} -> Alex: {text}")
+    background.add_task(_process_sam_message, db_pool, thread_id, text)
 
-    # 2. Relay Sam's message to Alex's real WhatsApp (prefixed so Alex sees who
-    #    it's from, since it arrives from our Cloud API number).
-    relay = await whatsapp.send_message(to=ALEX_NUMBER, text=f"🧑 {FRIEND_NAME}: {text}")
-
-    # 3. Run the pipeline; if it's a contact request, draft a reply for Alex.
-    #    If classification itself fails (LLM unreachable), fail OPEN — treat it
-    #    as a request so a genuine ask is never silently dropped. Worst case
-    #    Alex gets a draft on a non-request, which he can simply skip.
-    classifier = IntentClassifier()
-    classify_failed = False
-    try:
-        is_request = await classifier.is_contact_request(text)
-    except IntentClassificationError as e:
-        print(f"[Friend] Intent classification unavailable, failing open: {e}")
-        is_request = True
-        classify_failed = True
-
-    draft_sent = False
-    if is_request:
-        engine = MatchingEngine(db_pool)
-        result = await engine.match(text)
-        all_matches = result.get("matches", [])
-        viable = [m for m in all_matches if m.get("confidence", 0) >= 0.5]
-
-        generator = DraftGenerator()
-        draft = await generator.generate_draft(original_request=text, matches=viable)
-
-        event_id = await manager.add_event(thread_id, "draft_suggested", {
-            "original_message": text,
-            "draft_reply": draft,
-            "matches": all_matches,
-        })
-
-        # Push the draft to Alex with Send/Skip buttons, clearly marked so it is
-        # distinguishable from Sam's relayed message (same sender number).
-        buttons = [
-            {"type": "reply", "reply": {"id": f"send_{event_id}", "title": "✅ Send"}},
-            {"type": "reply", "reply": {"id": f"skip_{event_id}", "title": "❌ Skip"}},
-        ]
-        uncertain_note = (
-            "⚠️ _(couldn't auto-verify this was a request — sending a draft anyway)_\n\n"
-            if classify_failed else ""
-        )
-        draft_body = (
-            f"🤖 *Suggested reply to {FRIEND_NAME}*\n\n"
-            f"{uncertain_note}"
-            f"_{FRIEND_NAME} asked:_ {text}\n\n"
-            f"*Draft:* {draft}\n\n"
-            f"Tap Send to use it, or reply EDIT <your text>."
-        )
-        await whatsapp.send_interactive_buttons(to=ALEX_NUMBER, body_text=draft_body, buttons=buttons)
-        draft_sent = True
-
-    return {
-        "status": "sent",
-        "relayed_to_alex": relay.get("error") is None,
-        "draft_suggested": draft_sent,
-        "classification_failed": classify_failed,
-    }
+    return {"status": "queued"}
 
 
 @router.get("/friend/thread")

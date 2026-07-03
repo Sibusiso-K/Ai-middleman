@@ -96,7 +96,8 @@ Sound genuine, personal, and confident."""
                     )
                 if response.status_code == 200:
                     draft = response.json()["choices"][0]["message"]["content"].strip()
-                    print(f"[Draft] Generated (attempt {attempt}): {draft[:100]}...")
+                    from app.log_safe import slog
+                    slog(f"[Draft] Generated (attempt {attempt}): {draft[:100]}...")
                     return draft
                 # Retry rate-limits / server errors; give up on other 4xx.
                 print(f"[Draft] API error {response.status_code} (attempt {attempt}/{self.max_attempts})")

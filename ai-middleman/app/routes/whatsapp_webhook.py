@@ -32,6 +32,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 
 from app.services.conversation_manager import ConversationManager
+from app.log_safe import slog
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
@@ -150,7 +151,7 @@ async def route_message(db_pool, value: dict):
 
     # Otherwise this is Alex chatting back to Sam in his own words.
     await manager.add_event(thread_id, "alex_reply", {"text": text})
-    print(f"[Route] Logged Alex's free-text reply to Sam")
+    slog(f"[chat] Alex -> Sam: {text}")
 
 
 async def handle_alex_command(manager, thread_id, text, pending):
@@ -159,14 +160,15 @@ async def handle_alex_command(manager, thread_id, text, pending):
     text_upper = text.strip().upper()
 
     if text_upper == "SEND":
-        await manager.mark_draft_handled(thread_id, "sent", pending.get("draft_reply", ""))
-        print("[Alex] SEND — draft delivered to Sam")
+        draft = pending.get("draft_reply", "")
+        await manager.mark_draft_handled(thread_id, "sent", draft)
+        slog(f"[chat] Alex -> Sam (sent draft): {draft}")
 
     elif text_upper.startswith("EDIT ") or text_upper.startswith("EDIT:"):
         custom = text[5:].strip()
         if custom:
             await manager.mark_draft_handled(thread_id, "edited", custom)
-            print("[Alex] EDIT — custom reply delivered to Sam")
+            slog(f"[chat] Alex -> Sam (edited): {custom}")
 
     elif text_upper == "SKIP":
         await manager.mark_draft_handled(thread_id, "skipped", "")
@@ -181,10 +183,11 @@ async def handle_button_reply(manager, thread_id, reply_id: str):
         return
 
     if reply_id.startswith("send_"):
-        await manager.mark_draft_handled(thread_id, "sent", pending.get("draft_reply", ""))
-        print("[Button] SEND — draft delivered to Sam")
+        draft = pending.get("draft_reply", "")
+        await manager.mark_draft_handled(thread_id, "sent", draft)
+        slog(f"[chat] Alex -> Sam (sent draft): {draft}")
     elif reply_id.startswith("skip_"):
         await manager.mark_draft_handled(thread_id, "skipped", "")
-        print("[Button] SKIP — request dropped")
+        slog("[chat] Alex skipped the draft (nothing sent to Sam)")
     else:
         print(f"[Button] Unknown button id: {reply_id}")

@@ -132,73 +132,71 @@ if page == "🧑 Friend — Sam":
     st.title("🧑 Friend — Sam")
     st.caption("Send messages as Sam. They go to Alex's real WhatsApp; his replies come back here.")
 
-    st.info(
-        "ℹ️ Messages send from the Cloud API number (27650746242) to Alex (27736013348). "
-        "Alex must have messaged that number within the last 24h for WhatsApp to accept free-form sends."
+    st.caption(
+        "Chatting with Alex on 27736013348 (via 27650746242). "
+        "Free-form sends need Alex to have messaged that number within 24h."
     )
 
-    col_ar, col_rf = st.columns([1, 1])
-    auto_refresh = col_ar.checkbox("Auto-refresh every 3s", value=False, key="friend_autorefresh")
-    if col_rf.button("🔄 Refresh now", key="friend_refresh"):
-        st.rerun()
+    _RESOLUTIONS = {"draft_sent", "draft_edited", "draft_skipped"}
 
-    # ── Load the conversation ──
-    events = []
-    try:
-        resp = requests.get(f"{API_URL}/friend/thread", timeout=10)
-        if resp.status_code == 200:
-            events = resp.json().get("events", [])
-        else:
-            st.error(f"Could not load thread: {resp.status_code}")
-    except Exception as e:
-        st.error(f"Could not reach API: {e}")
+    # Live transcript: reruns ONLY this fragment every 1s (no full-page reload,
+    # so the sidebar health checks don't re-fire) — fast + always current.
+    @st.fragment(run_every=1)
+    def render_transcript():
+        try:
+            resp = requests.get(f"{API_URL}/friend/thread", timeout=8)
+            events = resp.json().get("events", []) if resp.status_code == 200 else []
+        except Exception:
+            st.caption("⚠️ Reconnecting to API…")
+            return
 
-    # ── Render transcript ──
-    for e in events:
-        etype = e.get("event_type")
-        payload = e.get("payload", {})
-        if isinstance(payload, str):
-            payload = json.loads(payload)
+        if not events:
+            st.caption("No messages yet. Say hi as Sam below 👇")
+            return
 
-        if etype == "friend_message":
-            with st.chat_message("user"):
-                st.markdown(f"**Sam:** {payload.get('text', '')}")
-        elif etype == "alex_reply":
-            with st.chat_message("assistant"):
-                st.markdown(f"**Alex:** {payload.get('text', '')}")
-        elif etype == "draft_sent":
-            with st.chat_message("assistant"):
-                st.markdown(f"**Alex:** {payload.get('final_text', '')}")
-        elif etype == "draft_skipped":
-            st.caption("— Alex skipped a suggested reply (nothing sent) —")
-        elif etype == "draft_suggested":
-            st.caption("⏳ Alex has a suggested reply pending on his WhatsApp…")
+        def _is_resolved(idx):
+            for k in range(idx + 1, len(events)):
+                nt = events[k].get("event_type")
+                if nt == "draft_suggested":
+                    break
+                if nt in _RESOLUTIONS:
+                    return True
+            return False
 
-    if not events:
-        st.caption("No messages yet. Say hi as Sam below 👇")
+        for i, e in enumerate(events):
+            etype = e.get("event_type")
+            payload = e.get("payload", {})
+            if isinstance(payload, str):
+                payload = json.loads(payload)
+
+            if etype == "friend_message":
+                with st.chat_message("user"):
+                    st.markdown(payload.get("text", ""))
+            elif etype == "alex_reply":
+                with st.chat_message("assistant"):
+                    st.markdown(payload.get("text", ""))
+            elif etype == "draft_sent":
+                with st.chat_message("assistant"):
+                    st.markdown(payload.get("final_text", ""))
+            elif etype == "draft_skipped":
+                st.caption("— Alex skipped a suggested reply (nothing sent) —")
+            elif etype == "draft_suggested" and not _is_resolved(i):
+                st.caption("⏳ Alex has a suggested reply pending on his WhatsApp…")
+
+    render_transcript()
 
     # ── Input box ──
     prompt = st.chat_input("Message as Sam…")
     if prompt:
         try:
-            r = requests.post(f"{API_URL}/friend/send", json={"text": prompt}, timeout=90)
-            if r.status_code == 200:
-                data = r.json()
-                if not data.get("relayed_to_alex"):
-                    st.warning("Message logged, but WhatsApp relay to Alex failed (check the 24h window / token).")
-            else:
+            # Returns instantly ({"status":"queued"}) — the relay + LLM pipeline
+            # run in the background, so the input never blocks on them.
+            r = requests.post(f"{API_URL}/friend/send", json={"text": prompt}, timeout=10)
+            if r.status_code != 200:
                 st.error(f"Send failed: {r.status_code} {r.text}")
         except Exception as e:
             st.error(f"Send failed: {e}")
         st.rerun()
-
-    if auto_refresh:
-        # Non-blocking: reload the page in 3s instead of sleeping the script
-        # thread (which would leave Streamlit stuck in a "Running…" state).
-        components.html(
-            "<script>setTimeout(function(){ window.parent.location.reload(); }, 3000);</script>",
-            height=0,
-        )
 
 
 # ═══════════════════════════════════════════════════════════════════
