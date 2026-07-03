@@ -12,6 +12,7 @@ Exposed: LLMAgent class with evaluate_matches(query, candidates) method.
 import httpx
 import os
 import json
+import re
 import asyncio
 from typing import Dict, Any, List
 from dotenv import load_dotenv
@@ -33,21 +34,36 @@ class LLMAgent:
 
     @staticmethod
     def _extract_json(content: str) -> Dict[str, Any]:
-        """Parse the model's reply into JSON, tolerating markdown fences or
-        surrounding prose by extracting the outermost {...} object."""
+        """Parse the model's reply into JSON, tolerating markdown fences,
+        surrounding prose, trailing commas, and stray unescaped quotes inside
+        string values (Llama-family models occasionally echo a candidate's
+        raw comment/name text verbatim, breaking strict JSON)."""
         text = (content or "").strip()
         if text.startswith("```"):
             # strip ```json … ``` fences
             text = text.split("```", 2)[1] if text.count("```") >= 2 else text.strip("`")
             if text.lstrip().lower().startswith("json"):
                 text = text.lstrip()[4:]
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            start, end = text.find("{"), text.rfind("}")
-            if start != -1 and end > start:
-                return json.loads(text[start:end + 1])
-            raise
+
+        candidates = [text]
+        start, end = text.find("{"), text.rfind("}")
+        if start != -1 and end > start:
+            candidates.append(text[start:end + 1])
+
+        last_error = None
+        for candidate in candidates:
+            for variant in (candidate, LLMAgent._strip_trailing_commas(candidate)):
+                try:
+                    return json.loads(variant)
+                except json.JSONDecodeError as e:
+                    last_error = e
+        raise last_error
+
+    @staticmethod
+    def _strip_trailing_commas(text: str) -> str:
+        """Removes trailing commas before a closing } or ] — a common
+        malformed-JSON pattern from smaller instruction-tuned models."""
+        return re.sub(r",(\s*[}\]])", r"\1", text)
 
     async def evaluate_matches(self, query: str, candidates: List[Dict]) -> Dict[str, Any]:
         if not candidates:
