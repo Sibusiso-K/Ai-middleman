@@ -41,6 +41,7 @@ router = APIRouter()
 
 ALEX_NUMBER = os.getenv("ALEX_WHATSAPP_NUMBER", "27736013348")
 FRIEND_NAME = os.getenv("FRIEND_SIM_NAME", "Sam")
+EDIT_FLOW_ID = os.getenv("WHATSAPP_EDIT_FLOW_ID")
 
 # Fast, LLM-free detector for "send me their details" follow-ups — no need to
 # wait on an intent-classifier round trip for a pattern this unambiguous.
@@ -154,23 +155,41 @@ async def _run_matching_and_push_draft(
         "matches": all_matches,
     })
 
+    # WhatsApp interactive messages can't mix reply buttons with a Flow
+    # button in one message, so Send/Skip stay as reply buttons here and
+    # Edit (if configured) goes out as a separate Flow message below.
     buttons = [
         {"type": "reply", "reply": {"id": f"send_{event_id}", "title": "✅ Send"}},
-        {"type": "reply", "reply": {"id": f"edit_{event_id}", "title": "✏️ Edit"}},
         {"type": "reply", "reply": {"id": f"skip_{event_id}", "title": "❌ Skip"}},
     ]
     uncertain_note = (
         "⚠️ _(couldn't auto-verify this was a request — sending a draft anyway)_\n\n"
         if uncertain else ""
     )
+    edit_hint = (
+        "Tap Send to use it as-is, or use the Edit form below to tweak it."
+        if EDIT_FLOW_ID else
+        "Tap Send to use it as-is, or reply EDIT <your version> to tweak it."
+    )
     draft_body = (
         f"🤖 *Suggested reply to {FRIEND_NAME}*\n\n"
         f"{uncertain_note}"
         f"_{FRIEND_NAME} asked:_ {display_text}\n\n"
         f"*Draft:* {draft}\n\n"
-        f"Tap Send to use it as-is, or Edit to get a copyable version to tweak."
+        f"{edit_hint}"
     )
     await whatsapp.send_interactive_buttons(to=ALEX_NUMBER, body_text=draft_body, buttons=buttons)
+
+    if EDIT_FLOW_ID:
+        await whatsapp.send_flow(
+            to=ALEX_NUMBER,
+            flow_id=EDIT_FLOW_ID,
+            screen="EDIT_DRAFT",
+            cta="Edit draft",
+            body_text="Want to tweak the wording before it goes out? Edit it here.",
+            initial_data={"draft_text": draft},
+        )
+
     emit("awaiting_approval", "📤 Sent to Alex for approval — waiting for Send/Skip")
 
 

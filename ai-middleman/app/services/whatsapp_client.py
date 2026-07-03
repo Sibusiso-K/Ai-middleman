@@ -128,3 +128,67 @@ class WhatsAppClient:
                 return response.json()
             except Exception:
                 return {"raw_response": response.text}
+
+    async def send_flow(
+        self,
+        to: str,
+        flow_id: str,
+        screen: str,
+        cta: str,
+        body_text: str,
+        initial_data: dict,
+    ) -> dict:
+        """
+        Send a WhatsApp Flow message — a single-button interactive message
+        that opens an in-chat form pre-populated with initial_data. Used for
+        the Edit-draft flow: the form's TextArea is pre-filled with the draft
+        text; the completed edit comes back via the normal webhook as an
+        interactive "nfm_reply" message.
+
+        Args:
+            to: Recipient WhatsApp number
+            flow_id: The published Flow's ID (WHATSAPP_EDIT_FLOW_ID)
+            screen: The Flow's screen id to open (e.g. "EDIT_DRAFT")
+            cta: Button label, max 20 chars
+            body_text: Message body shown above the button
+            initial_data: Dict passed into the screen as its starting data
+                (must match the Flow's declared `data` schema)
+        """
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": to,
+            "type": "interactive",
+            "interactive": {
+                "type": "flow",
+                "body": {"text": body_text},
+                "action": {
+                    "name": "flow",
+                    "parameters": {
+                        "flow_message_version": "3",
+                        "flow_id": flow_id,
+                        "flow_cta": cta,
+                        "flow_action": "navigate",
+                        "flow_action_payload": {
+                            "screen": screen,
+                            "data": initial_data,
+                        },
+                    },
+                },
+            },
+        }
+
+        async with httpx.AsyncClient(verify=_VERIFY, follow_redirects=True) as client:
+            response = await client.post(self.api_url, headers=headers, json=payload, timeout=15.0)
+
+            if response.status_code != 200:
+                print(f"WhatsApp flow send error: {response.status_code} {response.text}")
+                return {"error": response.status_code, "body": response.text}
+
+            try:
+                return response.json()
+            except Exception:
+                return {"raw_response": response.text}

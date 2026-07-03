@@ -1,0 +1,38 @@
+{
+  "version": "5.1",
+  "screens": [
+    {
+      "id": "EDIT_DRAFT",
+      "title": "Edit draft",
+      "terminal": true,
+      "data": {
+        "draft_text": {
+          "type": "string",
+          "__example__": "Hey, I know just the person for this..."
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "TextArea",
+            "name": "edited_text",
+            "label": "Edit the draft",
+            "required": true,
+            "init-value": "${data.draft_text}"
+          },
+          {
+            "type": "Footer",
+            "label": "Send",
+            "on-click-action": {
+              "name": "complete",
+              "payload": {
+                "edited_text": "${form.edited_text}"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

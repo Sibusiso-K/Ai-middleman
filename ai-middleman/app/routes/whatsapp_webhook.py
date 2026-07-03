@@ -135,6 +135,9 @@ async def route_message(db_pool, value: dict):
             reply_id = interactive.get("button_reply", {}).get("id", "")
             print(f"[Route] Button reply from {sender}: {reply_id}")
             await handle_button_reply(manager, thread_id, reply_id)
+        elif interactive.get("type") == "nfm_reply":
+            # Completed WhatsApp Flow submission — the Edit-draft form.
+            await handle_flow_reply(manager, thread_id, interactive.get("nfm_reply", {}))
         return
 
     # Resolve the message to plain text regardless of how it arrived — typed,
@@ -214,8 +217,9 @@ async def handle_alex_command(manager, thread_id, text, pending):
 
 
 async def handle_button_reply(manager, thread_id, reply_id: str):
-    """Handle a Send/Edit/Skip button tap. Button id format:
-    send_<eventid> / edit_<eventid> / skip_<eventid>."""
+    """Handle a Send/Skip button tap. Button id format:
+    send_<eventid> / skip_<eventid>. (Edit is handled separately via a
+    WhatsApp Flow — see handle_flow_reply.)"""
     pending = await manager.get_latest_pending_draft(thread_id)
     if not pending:
         print("[Button] No pending draft to act on")
@@ -226,28 +230,34 @@ async def handle_button_reply(manager, thread_id, reply_id: str):
         await manager.mark_draft_handled(thread_id, "sent", draft)
         slog(f"[chat] Alex -> Sam (sent draft): {draft}")
         emit("resolved", f"✅ Alex tapped Send: \"{draft}\"")
-    elif reply_id.startswith("edit_"):
-        # WhatsApp gives bots no way to pre-fill a user's compose box —
-        # interactive buttons can only trigger a fixed reply payload, not
-        # inject text into the input field. The closest real equivalent:
-        # send the raw draft as its own plain message so Alex can
-        # long-press -> Copy -> paste it into his reply, edit it, and send
-        # it back as "EDIT <his version>" to resolve the draft.
-        from app.services.whatsapp_client import WhatsAppClient
-        draft = pending.get("draft_reply", "")
-        await WhatsAppClient().send_message(
-            to=ALEX_NUMBER,
-            text=(
-                f"{draft}\n\n"
-                "— Long-press the text above to copy it, then paste it into your reply, "
-                "tweak it, and send it back as:\nEDIT <your version>"
-            ),
-        )
-        slog("[chat] Alex tapped Edit — sent him a copyable draft")
-        emit("checking", "✏️ Alex tapped Edit — sent him a copyable draft to adjust")
     elif reply_id.startswith("skip_"):
         await manager.mark_draft_handled(thread_id, "skipped", "")
         slog("[chat] Alex skipped the draft (nothing sent to Sam)")
         emit("resolved", "❌ Alex tapped Skip — nothing sent to Sam")
     else:
         print(f"[Button] Unknown button id: {reply_id}")
+
+
+async def handle_flow_reply(manager, thread_id, nfm_reply: dict):
+    """Handle a completed Edit-draft Flow submission. nfm_reply["response_json"]
+    is a JSON string matching the Flow's completion payload, e.g.
+    {"edited_text": "..."} — see whatsapp_flows/edit_draft_flow.json."""
+    pending = await manager.get_latest_pending_draft(thread_id)
+    if not pending:
+        print("[Flow] No pending draft to act on")
+        return
+
+    try:
+        response = json.loads(nfm_reply.get("response_json", "{}"))
+    except json.JSONDecodeError:
+        print(f"[Flow] Could not parse response_json: {nfm_reply.get('response_json')!r}")
+        return
+
+    edited_text = (response.get("edited_text") or "").strip()
+    if not edited_text:
+        print("[Flow] Empty edited_text in flow response")
+        return
+
+    await manager.mark_draft_handled(thread_id, "edited", edited_text)
+    slog(f"[chat] Alex -> Sam (edited via Flow): {edited_text}")
+    emit("resolved", f"✏️ Alex edited the draft via the Edit form: \"{edited_text}\"")
