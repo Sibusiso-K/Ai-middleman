@@ -64,6 +64,26 @@ class ConversationManager:
             e['payload'] = json.loads(e['payload']) if isinstance(e['payload'], str) else e['payload']
         return events
 
+    async def get_last_open_alex_question(self, thread_id: int) -> Optional[str]:
+        """
+        Return the text of Alex's most recent free-text reply if it reads like
+        a clarifying question (ends in '?') and nothing has happened on the
+        thread since — used to resolve a short confirmation from the friend
+        ("yeah") into the request Alex was actually asking about.
+        """
+        async with self.db_pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT event_type, payload FROM thread_events
+                WHERE thread_id = $1
+                ORDER BY created_at DESC
+                OFFSET 1 LIMIT 1
+            """, thread_id)
+        if not row or row['event_type'] != 'alex_reply':
+            return None
+        payload = json.loads(row['payload']) if isinstance(row['payload'], str) else row['payload']
+        text = (payload.get('text') or '').strip()
+        return text if text.endswith('?') else None
+
     async def get_last_sent_match(self, thread_id: int) -> Optional[dict]:
         """
         Return the single match that was actually delivered to the friend in

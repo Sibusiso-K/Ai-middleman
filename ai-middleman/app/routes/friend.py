@@ -9,9 +9,12 @@ The friend dashboard posts here to role-play Sam. Each send:
       details (phone/email), looks that contact up and pushes Alex a
       Send/Skip-gated draft with the actual details — revealing PII still
       requires his approval, it just doesn't need a fresh matching pass;
-  3b. otherwise runs the intent/matching/draft pipeline, and if it's a
-      contact request, pushes Alex a clearly-marked draft with Send/Skip
-      interactive buttons and records a draft_suggested event.
+  3b. if it's a short confirmation ("yeah") right after Alex asked a
+      clarifying question ("Oh you mean AI consulting?"), runs matching on
+      Alex's clarified phrasing instead of Sam's one-word reply;
+  3c. otherwise runs the intent/matching/draft pipeline (typo-tolerant), and
+      if it's a contact request, pushes Alex a clearly-marked draft with
+      Send/Skip interactive buttons and records a draft_suggested event.
 
 The dashboard then polls GET /friend/thread to render the conversation and any
 replies Alex sends back (which arrive via the webhook as alex_reply / draft_*).
@@ -48,6 +51,19 @@ _DETAILS_REQUEST_RE = re.compile(
 
 def _looks_like_details_request(text: str) -> bool:
     return bool(_DETAILS_REQUEST_RE.search(text))
+
+
+# Short, whole-message confirmations — used to detect "yeah"/"yep"/"correct"
+# replying to Alex's own clarifying question ("Oh you mean AI consulting?").
+_AFFIRMATION_RE = re.compile(
+    r"^\s*(yeah|yea|yeh|yes|yep|yup|sure|ok|okay|correct|right|exactly|"
+    r"that'?s (it|right|correct))[.!]*\s*$",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_affirmation(text: str) -> bool:
+    return bool(_AFFIRMATION_RE.match(text))
 
 
 async def _handle_details_request(db_pool, thread_id: int, text: str, whatsapp: "WhatsAppClient") -> bool:
@@ -98,6 +114,46 @@ async def _handle_details_request(db_pool, thread_id: int, text: str, whatsapp: 
     return True
 
 
+async def _run_matching_and_push_draft(
+    db_pool, thread_id: int, whatsapp: "WhatsAppClient",
+    request_text: str, display_text: str, uncertain: bool = False,
+):
+    """Run the matching+draft pipeline for request_text and push a Send/Skip
+    draft to Alex. display_text is what's shown as "{FRIEND_NAME} asked" (may
+    differ from request_text when resolved from a confirmed clarification)."""
+    manager = ConversationManager(db_pool)
+    engine = MatchingEngine(db_pool)
+    result = await engine.match(request_text)
+    all_matches = result.get("matches", [])
+    viable = [m for m in all_matches if m.get("confidence", 0) >= 0.5]
+
+    generator = DraftGenerator()
+    draft = await generator.generate_draft(original_request=request_text, matches=viable)
+
+    event_id = await manager.add_event(thread_id, "draft_suggested", {
+        "original_message": request_text,
+        "draft_reply": draft,
+        "matches": all_matches,
+    })
+
+    buttons = [
+        {"type": "reply", "reply": {"id": f"send_{event_id}", "title": "✅ Send"}},
+        {"type": "reply", "reply": {"id": f"skip_{event_id}", "title": "❌ Skip"}},
+    ]
+    uncertain_note = (
+        "⚠️ _(couldn't auto-verify this was a request — sending a draft anyway)_\n\n"
+        if uncertain else ""
+    )
+    draft_body = (
+        f"🤖 *Suggested reply to {FRIEND_NAME}*\n\n"
+        f"{uncertain_note}"
+        f"_{FRIEND_NAME} asked:_ {display_text}\n\n"
+        f"*Draft:* {draft}\n\n"
+        f"Tap Send to use it, or reply EDIT <your text>."
+    )
+    await whatsapp.send_interactive_buttons(to=ALEX_NUMBER, body_text=draft_body, buttons=buttons)
+
+
 async def _process_sam_message(db_pool, thread_id: int, text: str):
     """Relay Sam's message to Alex and run the intent/matching/draft pipeline.
     Runs as a background task so /friend/send returns instantly (the slow LLM
@@ -114,6 +170,21 @@ async def _process_sam_message(db_pool, thread_id: int, text: str):
     if await _handle_details_request(db_pool, thread_id, text, whatsapp):
         return
 
+    # A short confirmation ("yeah") immediately after Alex asked a clarifying
+    # question ("Oh you mean AI consulting?") means: run matching on what
+    # Alex asked, not on Sam's short "yeah" — the classifier alone can't see
+    # that confirmation, since it only ever looks at Sam's raw text.
+    if _looks_like_affirmation(text):
+        clarification = await manager.get_last_open_alex_question(thread_id)
+        if clarification:
+            effective_request = clarification.rstrip("?").strip()
+            slog(f"[Friend] Confirmed clarification -> matching on: {effective_request}")
+            await _run_matching_and_push_draft(
+                db_pool, thread_id, whatsapp,
+                request_text=effective_request, display_text=effective_request,
+            )
+            return
+
     # Fail OPEN if the classifier is unreachable, so a genuine ask is never dropped.
     classifier = IntentClassifier()
     classify_failed = False
@@ -127,36 +198,10 @@ async def _process_sam_message(db_pool, thread_id: int, text: str):
     if not is_request:
         return
 
-    engine = MatchingEngine(db_pool)
-    result = await engine.match(text)
-    all_matches = result.get("matches", [])
-    viable = [m for m in all_matches if m.get("confidence", 0) >= 0.5]
-
-    generator = DraftGenerator()
-    draft = await generator.generate_draft(original_request=text, matches=viable)
-
-    event_id = await manager.add_event(thread_id, "draft_suggested", {
-        "original_message": text,
-        "draft_reply": draft,
-        "matches": all_matches,
-    })
-
-    buttons = [
-        {"type": "reply", "reply": {"id": f"send_{event_id}", "title": "✅ Send"}},
-        {"type": "reply", "reply": {"id": f"skip_{event_id}", "title": "❌ Skip"}},
-    ]
-    uncertain_note = (
-        "⚠️ _(couldn't auto-verify this was a request — sending a draft anyway)_\n\n"
-        if classify_failed else ""
+    await _run_matching_and_push_draft(
+        db_pool, thread_id, whatsapp,
+        request_text=text, display_text=text, uncertain=classify_failed,
     )
-    draft_body = (
-        f"🤖 *Suggested reply to {FRIEND_NAME}*\n\n"
-        f"{uncertain_note}"
-        f"_{FRIEND_NAME} asked:_ {text}\n\n"
-        f"*Draft:* {draft}\n\n"
-        f"Tap Send to use it, or reply EDIT <your text>."
-    )
-    await whatsapp.send_interactive_buttons(to=ALEX_NUMBER, body_text=draft_body, buttons=buttons)
 
 
 @router.post("/friend/send")

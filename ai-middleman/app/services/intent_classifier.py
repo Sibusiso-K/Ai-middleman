@@ -44,8 +44,13 @@ class IntentClassifier:
         """
         prompt = f"""You are analysing a WhatsApp message sent to Alex, a well-connected business professional.
 
-Is this message asking Alex to introduce someone, recommend a contact, refer someone, 
+Is this message asking Alex to introduce someone, recommend a contact, refer someone,
 or connect the sender with a person from Alex's professional network?
+
+The message may contain typos, missing letters, or autocorrect mistakes (people type
+fast on WhatsApp) — read past the typos and judge the intended meaning, not the exact
+spelling. For example "i want sometging is Al consunltinnng" means
+"I want something in AI consulting" and IS a contact request.
 
 Examples that ARE contact requests:
 - "Do you know any good lawyers in London?"
