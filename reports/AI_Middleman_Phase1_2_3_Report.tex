@@ -1974,6 +1974,19 @@ Two usability issues surfaced during live testing with the project owner:
 
 A natural next step after a successful match --- ``seems good, please send her details'' --- previously fell through to the generic pipeline with no useful outcome. A lightweight, regex-based detector (\texttt{\_looks\_like\_details\_request}) now recognises this pattern without an extra LLM round trip, resolves the contact from the most recently \emph{delivered} match on the thread (\texttt{get\_last\_sent\_match}), looks up their phone/email, and pushes a Send/Skip-gated draft to Alex containing the real contact details. Revealing PII still requires Alex's explicit approval tap, consistent with the privacy model established in the Prompt 2 chapter --- the shortcut only skips re-running the matcher, not the approval gate.
 
+\section{Typo Tolerance and Clarification Confirmation}
+
+Live testing surfaced a conversation the pipeline handled badly end to end: the requester typed \emph{``i want sometging is Al consunltinnng''} (intending ``I want something in AI consulting''), Alex replied on WhatsApp with a clarifying question --- \emph{``Oh you mean AI consulting?''} --- and the requester confirmed with a bare \emph{``yeah''}. Neither message produced a draft.
+
+Two independent gaps were responsible:
+
+\begin{enumerate}[itemsep=3pt]
+    \item \textbf{Typos defeated the intent classifier.} The classifier is a small model constrained to a 5-token YES/NO response, and the garbled spelling was enough to tip it to NO. The prompt now explicitly instructs the model to read past typos and autocorrect mistakes and judge the intended meaning rather than the exact spelling, using the message above as a worked example.
+    \item \textbf{Confirmations were classified in isolation.} The pipeline only ever looked at the requester's raw text message by message --- it had no notion that a one-word ``yeah'' was confirming a question Alex had just asked. A new \texttt{ConversationManager.get\_last\_open\_alex\_question()} method returns Alex's most recent free-text reply if it reads as an open question (ends in ``?'') with nothing on the thread since; a bare, whole-message confirmation (``yeah'', ``yep'', ``sure'', ``that's right'', \ldots, matched narrowly so a sentence like ``yeah I need a lawyer'' still falls through to normal classification) now triggers matching on \emph{Alex's clarified phrasing} rather than on the confirmation word itself. The matching-and-draft-push logic was factored into a shared \texttt{\_run\_matching\_and\_push\_draft()} helper so both this path and the normal request path produce an identical Send/Skip-gated draft.
+\end{enumerate}
+
+Verified against an isolated test thread (kept separate from the live conversation to avoid interference from concurrent real-phone testing): the garbled message alone now classifies as a request, and the sequence typo $\to$ Alex's clarification $\to$ requester's ``yeah'' correctly produces a draft matched against the clarified request rather than dropping silently.
+
 \section{Verification}
 
 The full loop was exercised against real infrastructure rather than mocks: a genuine message typed into the friend-simulator dashboard was delivered to Alex's real WhatsApp account, a real AI-generated draft with interactive buttons was received and tapped on his phone, and the resulting reply flowed back through the live ngrok tunnel into the dashboard's chat view --- confirmed via direct database inspection of the \texttt{thread\_events} log and by observing genuine Meta-origin webhook deliveries (\texttt{2a03:2880:\ldots} source addresses) in the server log.
