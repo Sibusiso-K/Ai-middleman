@@ -214,7 +214,8 @@ async def handle_alex_command(manager, thread_id, text, pending):
 
 
 async def handle_button_reply(manager, thread_id, reply_id: str):
-    """Handle a Send/Skip button tap. Button id format: send_<eventid> / skip_<eventid>."""
+    """Handle a Send/Edit/Skip button tap. Button id format:
+    send_<eventid> / edit_<eventid> / skip_<eventid>."""
     pending = await manager.get_latest_pending_draft(thread_id)
     if not pending:
         print("[Button] No pending draft to act on")
@@ -225,6 +226,25 @@ async def handle_button_reply(manager, thread_id, reply_id: str):
         await manager.mark_draft_handled(thread_id, "sent", draft)
         slog(f"[chat] Alex -> Sam (sent draft): {draft}")
         emit("resolved", f"✅ Alex tapped Send: \"{draft}\"")
+    elif reply_id.startswith("edit_"):
+        # WhatsApp gives bots no way to pre-fill a user's compose box —
+        # interactive buttons can only trigger a fixed reply payload, not
+        # inject text into the input field. The closest real equivalent:
+        # send the raw draft as its own plain message so Alex can
+        # long-press -> Copy -> paste it into his reply, edit it, and send
+        # it back as "EDIT <his version>" to resolve the draft.
+        from app.services.whatsapp_client import WhatsAppClient
+        draft = pending.get("draft_reply", "")
+        await WhatsAppClient().send_message(
+            to=ALEX_NUMBER,
+            text=(
+                f"{draft}\n\n"
+                "— Long-press the text above to copy it, then paste it into your reply, "
+                "tweak it, and send it back as:\nEDIT <your version>"
+            ),
+        )
+        slog("[chat] Alex tapped Edit — sent him a copyable draft")
+        emit("checking", "✏️ Alex tapped Edit — sent him a copyable draft to adjust")
     elif reply_id.startswith("skip_"):
         await manager.mark_draft_handled(thread_id, "skipped", "")
         slog("[chat] Alex skipped the draft (nothing sent to Sam)")

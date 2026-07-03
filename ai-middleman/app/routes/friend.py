@@ -156,6 +156,7 @@ async def _run_matching_and_push_draft(
 
     buttons = [
         {"type": "reply", "reply": {"id": f"send_{event_id}", "title": "✅ Send"}},
+        {"type": "reply", "reply": {"id": f"edit_{event_id}", "title": "✏️ Edit"}},
         {"type": "reply", "reply": {"id": f"skip_{event_id}", "title": "❌ Skip"}},
     ]
     uncertain_note = (
@@ -167,7 +168,7 @@ async def _run_matching_and_push_draft(
         f"{uncertain_note}"
         f"_{FRIEND_NAME} asked:_ {display_text}\n\n"
         f"*Draft:* {draft}\n\n"
-        f"Tap Send to use it, or reply EDIT <your text>."
+        f"Tap Send to use it as-is, or Edit to get a copyable version to tweak."
     )
     await whatsapp.send_interactive_buttons(to=ALEX_NUMBER, body_text=draft_body, buttons=buttons)
     emit("awaiting_approval", "📤 Sent to Alex for approval — waiting for Send/Skip")

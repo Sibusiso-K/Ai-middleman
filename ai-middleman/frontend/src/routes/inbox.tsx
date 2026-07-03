@@ -5,7 +5,7 @@ import { Card, SectionHeader } from "@/components/ui-bits";
 import { AUDIT_LOG } from "@/lib/mock-data";
 import { api, type ThreadEvent } from "@/lib/api";
 import { usePipelineFeed, PipelineFlowCompact, PipelineFeed } from "@/components/pipeline-viz";
-import { Check, Pencil, X, Sparkles, History, Send, Paperclip, Mic, Square } from "lucide-react";
+import { Sparkles, History, Send, Paperclip, Mic, Square } from "lucide-react";
 
 export const Route = createFileRoute("/inbox")({
   head: () => ({ meta: [{ title: "Inbox · AI Middleman" }] }),
@@ -182,20 +182,9 @@ function InboxPage() {
 
             {draft && pending ? (
               <div className="p-4 border-t border-border">
-                <div className="rounded-2xl border border-primary-soft bg-primary-soft/40 p-4">
-                  <div className="flex items-center gap-2 text-xs font-medium text-primary-soft-foreground">
-                    <Sparkles className="w-3.5 h-3.5" /> AI Suggested Reply
-                  </div>
-                  <div className="mt-3 text-xs text-muted-foreground">
-                    Original request: <span className="text-foreground font-medium">{draft.payload.original_message}</span>
-                  </div>
-                  <p className="mt-2 text-sm">{draft.payload.draft_reply}</p>
-                  <div className="mt-3 flex gap-2">
-                    <button disabled className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-success/20 text-success text-xs font-medium opacity-60 cursor-not-allowed"><Check className="w-3.5 h-3.5" />Approve</button>
-                    <button disabled className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-muted text-foreground text-xs font-medium opacity-60 cursor-not-allowed"><Pencil className="w-3.5 h-3.5" />Edit</button>
-                    <button disabled className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-destructive/15 text-destructive text-xs font-medium opacity-60 cursor-not-allowed"><X className="w-3.5 h-3.5" />Reject</button>
-                  </div>
-                  <p className="mt-2 text-[11px] text-muted-foreground">Approve/Edit/Reject happen on Alex's WhatsApp via Send/Skip buttons — shown here for visibility only.</p>
+                <div className="rounded-2xl border border-primary-soft bg-primary-soft/40 p-3 flex items-center gap-2 text-xs text-primary-soft-foreground">
+                  <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                  AI drafted a reply — waiting on Alex's Send / Edit / Skip decision on his WhatsApp.
                 </div>
               </div>
             ) : null}
