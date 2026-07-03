@@ -118,9 +118,6 @@ export function AppShell({ children }: { children: ReactNode }) {
               </button>
             ))}
           </div>
-          <button className="h-9 px-3 rounded-xl text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors">
-            Deploy
-          </button>
         </header>
 
         <main className="flex-1 min-w-0 overflow-x-hidden">{children}</main>
