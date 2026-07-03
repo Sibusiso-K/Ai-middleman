@@ -12,6 +12,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "streamlit", "run", "ai-middleman/dashboard/app.py", "--server.port", "8501"],
       "port": 8501
+    },
+    {
+      "name": "web",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "5173", "--directory", "ai-middleman/web"],
+      "port": 5173
     }
   ]
 }

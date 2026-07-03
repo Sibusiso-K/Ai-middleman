@@ -21,11 +21,13 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / ".env")
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from .database import init_db, get_db
 from .services.matching_engine import MatchingEngine
 from .routes.whatsapp_webhook import router as whatsapp_router
 from .routes.friend import router as friend_router
+from .routes.pipeline import router as pipeline_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -42,8 +44,20 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="AI Middleman API", lifespan=lifespan)
 
+# Allow the Vercel-hosted friend chat frontend (or any browser) to call
+# /friend/* cross-origin. Demo-scoped: wide open by default, restrict via
+# CORS_ALLOWED_ORIGINS (comma-separated) if this ever needs to be tighter.
+_cors_origins = os.getenv("CORS_ALLOWED_ORIGINS", "*")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"] if _cors_origins == "*" else _cors_origins.split(","),
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
+
 app.include_router(whatsapp_router)
 app.include_router(friend_router)
+app.include_router(pipeline_router)
 
 @app.get("/")
 async def root():

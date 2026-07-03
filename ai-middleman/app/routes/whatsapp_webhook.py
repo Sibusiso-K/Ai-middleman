@@ -32,6 +32,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 
 from app.services.conversation_manager import ConversationManager
+from app.services.pipeline_events import emit
 from app.log_safe import slog
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
@@ -163,16 +164,19 @@ async def handle_alex_command(manager, thread_id, text, pending):
         draft = pending.get("draft_reply", "")
         await manager.mark_draft_handled(thread_id, "sent", draft)
         slog(f"[chat] Alex -> Sam (sent draft): {draft}")
+        emit("resolved", f"✅ Alex approved the draft: \"{draft}\"")
 
     elif text_upper.startswith("EDIT ") or text_upper.startswith("EDIT:"):
         custom = text[5:].strip()
         if custom:
             await manager.mark_draft_handled(thread_id, "edited", custom)
             slog(f"[chat] Alex -> Sam (edited): {custom}")
+            emit("resolved", f"✏️ Alex edited the draft: \"{custom}\"")
 
     elif text_upper == "SKIP":
         await manager.mark_draft_handled(thread_id, "skipped", "")
         print("[Alex] SKIP — request dropped, nothing delivered to Sam")
+        emit("resolved", "❌ Alex skipped the draft — nothing sent to Sam")
 
 
 async def handle_button_reply(manager, thread_id, reply_id: str):
@@ -186,8 +190,10 @@ async def handle_button_reply(manager, thread_id, reply_id: str):
         draft = pending.get("draft_reply", "")
         await manager.mark_draft_handled(thread_id, "sent", draft)
         slog(f"[chat] Alex -> Sam (sent draft): {draft}")
+        emit("resolved", f"✅ Alex tapped Send: \"{draft}\"")
     elif reply_id.startswith("skip_"):
         await manager.mark_draft_handled(thread_id, "skipped", "")
         slog("[chat] Alex skipped the draft (nothing sent to Sam)")
+        emit("resolved", "❌ Alex tapped Skip — nothing sent to Sam")
     else:
         print(f"[Button] Unknown button id: {reply_id}")

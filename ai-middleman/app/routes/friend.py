@@ -31,6 +31,7 @@ from app.services.matching_engine import MatchingEngine
 from app.services.draft_generator import DraftGenerator
 from app.services.conversation_manager import ConversationManager
 from app.services.whatsapp_client import WhatsAppClient
+from app.services.pipeline_events import emit
 from app.log_safe import slog
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
@@ -76,6 +77,8 @@ async def _handle_details_request(db_pool, thread_id: int, text: str, whatsapp: 
     if not _looks_like_details_request(text):
         return False
 
+    emit("checking", "🔍 Looks like Sam is asking for a contact's details")
+
     manager = ConversationManager(db_pool)
     match = await manager.get_last_sent_match(thread_id)
     if not match or not match.get("contact_id"):
@@ -111,6 +114,7 @@ async def _handle_details_request(db_pool, thread_id: int, text: str, whatsapp: 
         f"Tap Send to share it, or Skip to hold off."
     )
     await whatsapp.send_interactive_buttons(to=ALEX_NUMBER, body_text=draft_body, buttons=buttons)
+    emit("awaiting_approval", f"📤 Draft with {contact['full_name']}'s details sent to Alex — waiting for Send/Skip")
     return True
 
 
@@ -123,11 +127,14 @@ async def _run_matching_and_push_draft(
     differ from request_text when resolved from a confirmed clarification)."""
     manager = ConversationManager(db_pool)
     engine = MatchingEngine(db_pool)
+    emit("matching", f"🔗 Searching contacts for: \"{request_text}\"")
     result = await engine.match(request_text)
     all_matches = result.get("matches", [])
     viable = [m for m in all_matches if m.get("confidence", 0) >= 0.5]
+    emit("matching", f"🔗 Found {len(viable)} good match(es)" if viable else "🔗 No confident match found")
 
     generator = DraftGenerator()
+    emit("drafting", "✍️ Writing a suggested reply")
     draft = await generator.generate_draft(original_request=request_text, matches=viable)
 
     event_id = await manager.add_event(thread_id, "draft_suggested", {
@@ -152,6 +159,7 @@ async def _run_matching_and_push_draft(
         f"Tap Send to use it, or reply EDIT <your text>."
     )
     await whatsapp.send_interactive_buttons(to=ALEX_NUMBER, body_text=draft_body, buttons=buttons)
+    emit("awaiting_approval", "📤 Sent to Alex for approval — waiting for Send/Skip")
 
 
 async def _process_sam_message(db_pool, thread_id: int, text: str):
@@ -162,6 +170,7 @@ async def _process_sam_message(db_pool, thread_id: int, text: str):
     whatsapp = WhatsAppClient()
 
     # Relay to Alex's WhatsApp as plain text (reads like a normal conversation).
+    emit("relaying", "📡 Relaying Sam's message to Alex's WhatsApp")
     await whatsapp.send_message(to=ALEX_NUMBER, text=text)
 
     # A "send their details" follow-up is handled directly against the last
@@ -175,6 +184,7 @@ async def _process_sam_message(db_pool, thread_id: int, text: str):
     # Alex asked, not on Sam's short "yeah" — the classifier alone can't see
     # that confirmation, since it only ever looks at Sam's raw text.
     if _looks_like_affirmation(text):
+        emit("checking", "🔍 That looks like a 'yes' to Alex's earlier question")
         clarification = await manager.get_last_open_alex_question(thread_id)
         if clarification:
             effective_request = clarification.rstrip("?").strip()
@@ -188,15 +198,20 @@ async def _process_sam_message(db_pool, thread_id: int, text: str):
     # Fail OPEN if the classifier is unreachable, so a genuine ask is never dropped.
     classifier = IntentClassifier()
     classify_failed = False
+    emit("intent", "🧠 Asking the AI: is this a contact request?")
     try:
         is_request = await classifier.is_contact_request(text)
     except IntentClassificationError as e:
         slog(f"[Friend] Intent classification unavailable, failing open: {e}")
+        emit("intent", "⚠️ AI classifier unreachable — assuming yes, just in case")
         is_request = True
         classify_failed = True
 
     if not is_request:
+        emit("resolved", "🙅 Not a contact request — nothing to do")
         return
+
+    emit("intent", "🧠 Yes — this is a contact request")
 
     await _run_matching_and_push_draft(
         db_pool, thread_id, whatsapp,
@@ -222,6 +237,7 @@ async def friend_send(request: Request, background: BackgroundTasks):
     # hand the slow work (WhatsApp relay + intent/matching/draft) to the background.
     await manager.add_event(thread_id, "friend_message", {"text": text})
     slog(f"[chat] {FRIEND_NAME} -> Alex: {text}")
+    emit("received", f"📩 {FRIEND_NAME} says: \"{text}\"")
     background.add_task(_process_sam_message, db_pool, thread_id, text)
 
     return {"status": "queued"}
