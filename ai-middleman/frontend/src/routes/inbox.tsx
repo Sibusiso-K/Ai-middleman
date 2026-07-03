@@ -1,21 +1,47 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card } from "@/components/ui-bits";
-import { THREADS, AUDIT_LOG } from "@/lib/mock-data";
-import { Check, Pencil, X, Search, Sparkles, History } from "lucide-react";
+import { AUDIT_LOG } from "@/lib/mock-data";
+import { api, type ThreadEvent } from "@/lib/api";
+import { Check, Pencil, X, Search, Sparkles, History, Send } from "lucide-react";
 
 export const Route = createFileRoute("/inbox")({
   head: () => ({ meta: [{ title: "Inbox · AI Middleman" }] }),
   component: InboxPage,
 });
 
-function InboxPage() {
-  const [selectedId, setSelectedId] = useState(THREADS[0].id);
-  const [filter, setFilter] = useState<"all" | "pending" | "answered">("all");
-  const [tab, setTab] = useState<"threads" | "audit">("threads");
-  const selected = THREADS.find((t) => t.id === selectedId)!;
+function lastDraft(events: ThreadEvent[]) {
+  return [...events].reverse().find((e) => e.event_type === "draft_suggested");
+}
 
-  const filtered = THREADS.filter((t) => filter === "all" || t.status === filter);
+function isPending(events: ThreadEvent[]) {
+  const draft = lastDraft(events);
+  if (!draft) return false;
+  return !events.some((e) => e.created_at > draft.created_at && ["draft_sent", "draft_skipped"].includes(e.event_type));
+}
+
+function InboxPage() {
+  const [tab, setTab] = useState<"threads" | "audit">("threads");
+  const [text, setText] = useState("");
+  const queryClient = useQueryClient();
+
+  const threadQuery = useQuery({
+    queryKey: ["friend-thread"],
+    queryFn: api.friendThread,
+    refetchInterval: 4000,
+  });
+  const sendMutation = useMutation({
+    mutationFn: (t: string) => api.friendSend(t),
+    onSuccess: () => {
+      setText("");
+      queryClient.invalidateQueries({ queryKey: ["friend-thread"] });
+    },
+  });
+
+  const events = threadQuery.data?.events ?? [];
+  const draft = lastDraft(events);
+  const pending = isPending(events);
 
   return (
     <div className="h-[calc(100vh-3.5rem)] flex flex-col">
@@ -48,101 +74,100 @@ function InboxPage() {
         </div>
       ) : (
         <div className="flex-1 min-h-0 px-6 pb-6 grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-4">
-          {/* Threads list */}
+          {/* Single Sam<->Alex thread — this system runs one friend/Alex thread, not a multi-contact inbox */}
           <Card className="flex flex-col min-h-0 overflow-hidden">
             <div className="p-3 border-b border-border space-y-2">
               <div className="relative">
                 <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <input placeholder="Search threads" className="w-full h-9 pl-9 pr-3 rounded-xl bg-muted text-sm focus:outline-none" />
-              </div>
-              <div className="flex gap-1.5">
-                {(["all", "pending", "answered"] as const).map((f) => (
-                  <button
-                    key={f}
-                    onClick={() => setFilter(f)}
-                    className={`px-2.5 h-7 rounded-full text-xs capitalize ${
-                      filter === f ? "bg-primary-soft text-primary-soft-foreground" : "bg-muted text-muted-foreground"
-                    }`}
-                  >
-                    {f}
-                  </button>
-                ))}
+                <input placeholder="Search threads" disabled className="w-full h-9 pl-9 pr-3 rounded-xl bg-muted text-sm focus:outline-none opacity-60" />
               </div>
             </div>
             <ul className="flex-1 overflow-y-auto">
-              {filtered.map((t) => (
-                <li key={t.id}>
-                  <button
-                    onClick={() => setSelectedId(t.id)}
-                    className={`w-full text-left p-3 border-b border-border/60 flex gap-3 hover:bg-muted/50 ${selectedId === t.id ? "bg-accent/60" : ""}`}
-                  >
-                    <div className="w-9 h-9 rounded-xl bg-primary-soft text-primary-soft-foreground grid place-items-center text-xs font-semibold shrink-0">
-                      {t.contact.split(" ").map((n) => n[0]).slice(0, 2).join("")}
+              <li>
+                <div className="w-full text-left p-3 border-b border-border/60 flex gap-3 bg-accent/60">
+                  <div className="w-9 h-9 rounded-xl bg-primary-soft text-primary-soft-foreground grid place-items-center text-xs font-semibold shrink-0">SA</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <div className="font-medium text-sm truncate flex-1">Sam → Alex</div>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <div className="font-medium text-sm truncate flex-1">{t.contact}</div>
-                        <div className="text-[11px] text-muted-foreground shrink-0">{t.time}</div>
-                      </div>
-                      <div className="text-xs text-muted-foreground truncate">{t.preview}</div>
+                    <div className="text-xs text-muted-foreground truncate">
+                      {threadQuery.isLoading ? "Loading…" : events.length ? "Live thread" : "No messages yet"}
                     </div>
-                    {t.pending > 0 && <span className="w-5 h-5 shrink-0 rounded-full bg-primary-soft text-primary-soft-foreground text-[10px] font-semibold grid place-items-center">{t.pending}</span>}
-                  </button>
-                </li>
-              ))}
+                  </div>
+                  {pending && <span className="w-5 h-5 shrink-0 rounded-full bg-primary-soft text-primary-soft-foreground text-[10px] font-semibold grid place-items-center">1</span>}
+                </div>
+              </li>
             </ul>
           </Card>
 
           {/* Conversation */}
           <Card className="flex flex-col min-h-0 overflow-hidden">
             <div className="h-14 px-4 border-b border-border flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-primary-soft text-primary-soft-foreground grid place-items-center text-xs font-semibold">
-                {selected.contact.split(" ").map((n) => n[0]).slice(0, 2).join("")}
-              </div>
+              <div className="w-9 h-9 rounded-xl bg-primary-soft text-primary-soft-foreground grid place-items-center text-xs font-semibold">SA</div>
               <div className="min-w-0">
-                <div className="font-medium text-sm truncate">{selected.contact}</div>
-                <div className="text-xs text-muted-foreground">{selected.phone}</div>
+                <div className="font-medium text-sm truncate">Sam → Alex</div>
+                <div className="text-xs text-muted-foreground">Relayed live over WhatsApp</div>
               </div>
             </div>
             <div className="flex-1 overflow-y-auto p-6 space-y-3 bg-surface-2/40">
-              {selected.messages.map((m, i) => (
-                <div key={i} className={`flex ${m.from === "us" ? "justify-end" : "justify-start"}`}>
-                  <div className={`max-w-[70%] rounded-2xl px-3.5 py-2 text-sm ${m.from === "us" ? "bg-primary-soft text-primary-soft-foreground rounded-br-md" : "bg-surface rounded-bl-md shadow-soft"}`}>
-                    {m.text}
-                    <div className="text-[10px] opacity-60 mt-1 text-right">{m.time}</div>
-                  </div>
-                </div>
-              ))}
+              {threadQuery.isLoading ? (
+                <div className="text-sm text-muted-foreground text-center py-8">Loading conversation…</div>
+              ) : events.length === 0 ? (
+                <div className="text-sm text-muted-foreground text-center py-8">No messages yet — send one below to kick off the pipeline.</div>
+              ) : (
+                events
+                  .filter((e) => ["friend_message", "alex_reply"].includes(e.event_type))
+                  .map((e) => {
+                    const fromUs = e.event_type === "friend_message";
+                    const text = e.payload.text ?? "";
+                    return (
+                      <div key={e.id} className={`flex ${fromUs ? "justify-end" : "justify-start"}`}>
+                        <div className={`max-w-[70%] rounded-2xl px-3.5 py-2 text-sm ${fromUs ? "bg-primary-soft text-primary-soft-foreground rounded-br-md" : "bg-surface rounded-bl-md shadow-soft"}`}>
+                          {text}
+                          <div className="text-[10px] opacity-60 mt-1 text-right">{new Date(e.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
+                        </div>
+                      </div>
+                    );
+                  })
+              )}
             </div>
 
-            {selected.suggested ? (
+            {draft && pending ? (
               <div className="p-4 border-t border-border">
                 <div className="rounded-2xl border border-primary-soft bg-primary-soft/40 p-4">
                   <div className="flex items-center gap-2 text-xs font-medium text-primary-soft-foreground">
                     <Sparkles className="w-3.5 h-3.5" /> AI Suggested Reply
-                    <span className="ml-auto rounded-full bg-surface px-2 py-0.5 text-[11px] tabular-nums">{selected.suggested.confidence}% confidence</span>
                   </div>
                   <div className="mt-3 text-xs text-muted-foreground">
-                    Match: <span className="text-foreground font-medium">{selected.suggested.match}</span> · {selected.suggested.role} @ {selected.suggested.company}
+                    Original request: <span className="text-foreground font-medium">{draft.payload.original_message}</span>
                   </div>
-                  <p className="mt-2 text-sm">{selected.suggested.reply}</p>
+                  <p className="mt-2 text-sm">{draft.payload.draft_reply}</p>
                   <div className="mt-3 flex gap-2">
-                    <button className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-success/20 text-success text-xs font-medium hover:bg-success/30"><Check className="w-3.5 h-3.5" />Approve</button>
-                    <button className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-muted text-foreground text-xs font-medium hover:bg-muted/80"><Pencil className="w-3.5 h-3.5" />Edit</button>
-                    <button className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-destructive/15 text-destructive text-xs font-medium hover:bg-destructive/25"><X className="w-3.5 h-3.5" />Reject</button>
+                    <button disabled className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-success/20 text-success text-xs font-medium opacity-60 cursor-not-allowed"><Check className="w-3.5 h-3.5" />Approve</button>
+                    <button disabled className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-muted text-foreground text-xs font-medium opacity-60 cursor-not-allowed"><Pencil className="w-3.5 h-3.5" />Edit</button>
+                    <button disabled className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-destructive/15 text-destructive text-xs font-medium opacity-60 cursor-not-allowed"><X className="w-3.5 h-3.5" />Reject</button>
                   </div>
+                  <p className="mt-2 text-[11px] text-muted-foreground">Approve/Edit/Reject happen on Alex's WhatsApp via Send/Skip buttons — shown here for visibility only.</p>
                 </div>
               </div>
-            ) : (
-              <div className="p-8 border-t border-border text-center">
-                <div className="mx-auto w-12 h-12 rounded-2xl bg-accent grid place-items-center mb-3">
-                  <Sparkles className="w-5 h-5 text-accent-foreground" />
-                </div>
-                <div className="text-sm font-medium">No strong match found</div>
-                <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">The AI couldn't confidently match this request. Try broadening the search criteria.</p>
-                <button className="mt-3 inline-flex items-center gap-1.5 h-9 px-4 rounded-xl bg-primary-soft text-primary-soft-foreground text-sm font-medium">Broaden search</button>
-              </div>
-            )}
+            ) : null}
+
+            <div className="p-3 border-t border-border flex gap-2">
+              <input
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && text.trim()) sendMutation.mutate(text); }}
+                placeholder="Message as Sam…"
+                className="flex-1 h-10 px-3 rounded-xl bg-muted text-sm focus:outline-none"
+              />
+              <button
+                onClick={() => text.trim() && sendMutation.mutate(text)}
+                disabled={sendMutation.isPending || !text.trim()}
+                className="inline-flex items-center gap-1.5 h-10 px-4 rounded-xl bg-primary-soft text-primary-soft-foreground text-sm font-medium disabled:opacity-60"
+              >
+                <Send className="w-4 h-4" /> Send
+              </button>
+            </div>
           </Card>
         </div>
       )}

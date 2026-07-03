@@ -28,6 +28,7 @@ from .services.matching_engine import MatchingEngine
 from .routes.whatsapp_webhook import router as whatsapp_router
 from .routes.friend import router as friend_router
 from .routes.pipeline import router as pipeline_router
+from .routes.dashboard_api import router as dashboard_api_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -58,6 +59,7 @@ app.add_middleware(
 app.include_router(whatsapp_router)
 app.include_router(friend_router)
 app.include_router(pipeline_router)
+app.include_router(dashboard_api_router)
 
 @app.get("/")
 async def root():

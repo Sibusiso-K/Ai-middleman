@@ -1,10 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
 } from "recharts";
 import { Card, SectionHeader } from "@/components/ui-bits";
-import { ACTIVITY, SECTOR_STATS, LOCATION_STATS, SECTORS } from "@/lib/mock-data";
+import { SECTORS } from "@/lib/mock-data";
+import { api } from "@/lib/api";
 import { CheckCircle2, Circle, X, Sparkles, MessageSquareText, UserPlus, ArrowUpRight } from "lucide-react";
 
 export const Route = createFileRoute("/")({
@@ -12,24 +14,66 @@ export const Route = createFileRoute("/")({
   component: HomePage,
 });
 
-const KPIS = [
-  { label: "Total Contacts", value: "50,284", delta: "+412 this week" },
-  { label: "VIP Contacts", value: "1,847", delta: "+23 flagged" },
-  { label: "Avg Relationship Strength", value: "3.8", delta: "of 5.0" },
-  { label: "Sectors Covered", value: "7", delta: "Global" },
-];
-
 const CHECKLIST = [
   { label: "Connect OpenAI API key", done: true },
   { label: "Configure WhatsApp webhook", done: true },
-  { label: "Import contact database", done: false },
+  { label: "Import contact database", done: true },
   { label: "Invite reviewers to Inbox", done: false },
 ];
 
-const ICONS = { match: Sparkles, draft: MessageSquareText, sent: CheckCircle2, contact: UserPlus } as const;
+const ICONS: Record<string, typeof Sparkles> = {
+  draft_suggested: MessageSquareText,
+  friend_message: UserPlus,
+  alex_reply: Sparkles,
+  draft_sent: CheckCircle2,
+  draft_skipped: X,
+};
+
+function sectorColor(name: string) {
+  return SECTORS.find((s) => s.name === name)?.color ?? SECTORS[0].color;
+}
+
+function activityText(e: { event_type: string; payload: Record<string, any> }) {
+  switch (e.event_type) {
+    case "friend_message":
+      return `Sam asked: "${e.payload.text}"`;
+    case "draft_suggested":
+      return `AI drafted a reply — "${(e.payload.original_message ?? "").toString().slice(0, 60)}"`;
+    case "draft_sent":
+      return "Draft sent to the requester";
+    case "draft_skipped":
+      return "Draft skipped by Alex";
+    case "alex_reply":
+      return `Alex replied: "${e.payload.text}"`;
+    default:
+      return e.event_type;
+  }
+}
+
+function timeAgo(iso: string) {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
 
 function HomePage() {
   const [showOnboarding, setShowOnboarding] = useState(true);
+
+  const summary = useQuery({ queryKey: ["analytics", "summary"], queryFn: api.analyticsSummary });
+  const sectors = useQuery({ queryKey: ["analytics", "sectors"], queryFn: api.analyticsSectors });
+  const locations = useQuery({ queryKey: ["analytics", "locations"], queryFn: () => api.analyticsLocations(10) });
+  const activity = useQuery({ queryKey: ["activity"], queryFn: () => api.activity(6) });
+
+  const kpis = [
+    { label: "Total Contacts", value: summary.data?.total_contacts.toLocaleString() ?? "—", delta: "" },
+    { label: "VIP Contacts", value: summary.data?.vip_contacts.toLocaleString() ?? "—", delta: "" },
+    { label: "Avg Relationship Strength", value: summary.data ? `${summary.data.avg_relationship_strength}` : "—", delta: "of 5.0" },
+    { label: "Sectors Covered", value: summary.data?.sectors_covered ?? "—", delta: "Global" },
+  ];
 
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-6">
@@ -61,7 +105,7 @@ function HomePage() {
       )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {KPIS.map((k) => (
+        {kpis.map((k) => (
           <Card key={k.label} className="p-5">
             <div className="text-xs text-muted-foreground">{k.label}</div>
             <div className="text-3xl font-semibold tabular-nums mt-2">{k.value}</div>
@@ -72,20 +116,26 @@ function HomePage() {
 
       <Card className="p-5">
         <SectionHeader title="Today" subtitle="Live activity across the middleman pipeline" />
-        <ul className="divide-y divide-border">
-          {ACTIVITY.map((a, i) => {
-            const Icon = ICONS[a.icon as keyof typeof ICONS];
-            return (
-              <li key={i} className="py-3 flex items-center gap-3">
-                <div className="w-8 h-8 rounded-xl bg-accent grid place-items-center shrink-0">
-                  <Icon className="w-4 h-4 text-accent-foreground" />
-                </div>
-                <div className="flex-1 min-w-0 text-sm truncate">{a.text}</div>
-                <div className="text-xs text-muted-foreground shrink-0">{a.time}</div>
-              </li>
-            );
-          })}
-        </ul>
+        {activity.isLoading ? (
+          <div className="py-6 text-sm text-muted-foreground">Loading activity…</div>
+        ) : !activity.data?.length ? (
+          <div className="py-6 text-sm text-muted-foreground">No activity yet — send a request from the Inbox to get started.</div>
+        ) : (
+          <ul className="divide-y divide-border">
+            {activity.data.map((a, i) => {
+              const Icon = ICONS[a.event_type] ?? Sparkles;
+              return (
+                <li key={i} className="py-3 flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-accent grid place-items-center shrink-0">
+                    <Icon className="w-4 h-4 text-accent-foreground" />
+                  </div>
+                  <div className="flex-1 min-w-0 text-sm truncate">{activityText(a)}</div>
+                  <div className="text-xs text-muted-foreground shrink-0">{timeAgo(a.created_at)}</div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -95,16 +145,16 @@ function HomePage() {
             <div className="w-40 h-40 shrink-0">
               <ResponsiveContainer>
                 <PieChart>
-                  <Pie data={SECTOR_STATS} innerRadius={44} outerRadius={72} paddingAngle={2} dataKey="value" stroke="none">
-                    {SECTOR_STATS.map((s) => <Cell key={s.name} fill={s.color} />)}
+                  <Pie data={sectors.data ?? []} innerRadius={44} outerRadius={72} paddingAngle={2} dataKey="value" stroke="none">
+                    {(sectors.data ?? []).map((s) => <Cell key={s.name} fill={sectorColor(s.name)} />)}
                   </Pie>
                 </PieChart>
               </ResponsiveContainer>
             </div>
             <ul className="flex-1 min-w-0 space-y-1.5 text-sm">
-              {SECTOR_STATS.map((s) => (
+              {(sectors.data ?? []).map((s) => (
                 <li key={s.name} className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: s.color }} />
+                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: sectorColor(s.name) }} />
                   <span className="flex-1 truncate">{s.name}</span>
                   <span className="text-muted-foreground tabular-nums">{s.value.toLocaleString()}</span>
                 </li>
@@ -117,7 +167,7 @@ function HomePage() {
           <SectionHeader title="Top 10 Locations" action={<a className="text-xs text-muted-foreground inline-flex items-center gap-1">All <ArrowUpRight className="w-3 h-3" /></a>} />
           <div className="h-64">
             <ResponsiveContainer>
-              <BarChart data={LOCATION_STATS} layout="vertical" margin={{ left: 10, right: 20 }}>
+              <BarChart data={locations.data ?? []} layout="vertical" margin={{ left: 10, right: 20 }}>
                 <CartesianGrid horizontal={false} stroke="var(--color-border)" />
                 <XAxis type="number" hide />
                 <YAxis type="category" dataKey="name" width={80} axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "var(--color-muted-foreground)" }} />

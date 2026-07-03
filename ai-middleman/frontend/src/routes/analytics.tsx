@@ -1,6 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import { Card, SectionHeader } from "@/components/ui-bits";
-import { SCATTER_DATA, SECTORS, TOP_SKILLS } from "@/lib/mock-data";
+import { SECTORS } from "@/lib/mock-data";
+import { api } from "@/lib/api";
 import {
   ScatterChart, Scatter, XAxis, YAxis, ZAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar, Cell,
@@ -11,15 +13,18 @@ export const Route = createFileRoute("/analytics")({
   component: AnalyticsPage,
 });
 
-const SECTOR_DEALS = SECTORS.map((s, i) => ({
-  name: s.name,
-  color: s.color,
-  value: 6 + ((i * 13) % 18),
-}));
-
-const maxSkill = Math.max(...TOP_SKILLS.map((s) => s.count));
+function sectorColor(name: string) {
+  return SECTORS.find((s) => s.name === name)?.color ?? SECTORS[0].color;
+}
 
 function AnalyticsPage() {
+  const scatter = useQuery({ queryKey: ["analytics", "scatter"], queryFn: () => api.analyticsScatter(500) });
+  const deals = useQuery({ queryKey: ["analytics", "deals"], queryFn: api.analyticsDealsBySector });
+  const skills = useQuery({ queryKey: ["analytics", "top-skills"], queryFn: () => api.analyticsTopSkills(8) });
+
+  const sectorDeals = (deals.data ?? []).map((d) => ({ ...d, color: sectorColor(d.name) }));
+  const maxSkill = Math.max(1, ...(skills.data ?? []).map((s) => s.count));
+
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-6">
       <div>
@@ -39,7 +44,7 @@ function AnalyticsPage() {
                 <ZAxis range={[60, 60]} />
                 <Tooltip cursor={{ strokeDasharray: "3 3" }} contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--color-border)", borderRadius: 12, fontSize: 12 }} />
                 {SECTORS.map((s) => (
-                  <Scatter key={s.name} name={s.name} data={SCATTER_DATA.filter((d) => d.sector === s.name)} fill={s.color} />
+                  <Scatter key={s.name} name={s.name} data={(scatter.data ?? []).filter((d) => d.sector === s.name)} fill={s.color} />
                 ))}
               </ScatterChart>
             </ResponsiveContainer>
@@ -57,13 +62,13 @@ function AnalyticsPage() {
           <SectionHeader title="Average Deals Closed by Sector" />
           <div className="h-72">
             <ResponsiveContainer>
-              <BarChart data={SECTOR_DEALS} margin={{ left: 0, right: 10, top: 10 }}>
+              <BarChart data={sectorDeals} margin={{ left: 0, right: 10, top: 10 }}>
                 <CartesianGrid stroke="var(--color-border)" vertical={false} />
                 <XAxis dataKey="name" tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} axisLine={false} tickLine={false} />
                 <Tooltip contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--color-border)", borderRadius: 12, fontSize: 12 }} />
                 <Bar dataKey="value" radius={[8, 8, 0, 0]}>
-                  {SECTOR_DEALS.map((s) => <Cell key={s.name} fill={s.color} />)}
+                  {sectorDeals.map((s) => <Cell key={s.name} fill={s.color} />)}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -72,9 +77,9 @@ function AnalyticsPage() {
       </div>
 
       <Card className="p-5">
-        <SectionHeader title="Top Requested Skills & Sectors" subtitle="What the WhatsApp bot is actually being asked for" />
+        <SectionHeader title="Top Specialties in Network" subtitle="Most common contact specialties across the database" />
         <ul className="space-y-2.5">
-          {TOP_SKILLS.map((s, i) => (
+          {(skills.data ?? []).map((s, i) => (
             <li key={s.name} className="flex items-center gap-3">
               <div className="w-6 text-xs text-muted-foreground tabular-nums">{i + 1}.</div>
               <div className="flex-1 min-w-0">

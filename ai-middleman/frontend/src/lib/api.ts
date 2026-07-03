@@ -103,4 +103,5 @@ export const api = {
   match: (query: string) => post<MatchResult>("/match", { query }),
   friendThread: () => request<{ thread_id: number; events: ThreadEvent[] }>("/friend/thread"),
   friendSend: (text: string) => post<{ status: string } | { error: string }>("/friend/send", { text }),
+  health: () => request<{ status: string }>("/health"),
 };

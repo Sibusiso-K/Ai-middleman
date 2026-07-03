@@ -1,10 +1,11 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useState, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Home, Inbox, Sparkles, Users, BarChart3, Search, ChevronsLeft, ChevronsRight, Handshake,
 } from "lucide-react";
 import { useTheme, type Theme } from "@/lib/theme";
-import { THREADS } from "@/lib/mock-data";
+import { api } from "@/lib/api";
 
 const NAV = [
   { to: "/", label: "Home", icon: Home, exact: true },
@@ -25,7 +26,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const { theme, setTheme } = useTheme();
   const path = useRouterState({ select: (s) => s.location.pathname });
-  const pendingCount = THREADS.filter((t) => t.status === "pending").length;
+  const threadQuery = useQuery({ queryKey: ["friend-thread"], queryFn: api.friendThread, refetchInterval: 10000 });
+  const events = threadQuery.data?.events ?? [];
+  const lastDraftAt = [...events].reverse().find((e) => e.event_type === "draft_suggested")?.created_at;
+  const pendingCount = lastDraftAt && !events.some((e) => e.created_at > lastDraftAt && ["draft_sent", "draft_skipped"].includes(e.event_type)) ? 1 : 0;
+  const healthQuery = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 15000, retry: false });
+  const isOnline = healthQuery.data?.status === "ok";
 
   return (
     <div className="min-h-screen w-full flex bg-background text-foreground">
@@ -95,8 +101,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             </kbd>
           </div>
           <div className="hidden lg:flex items-center gap-3 text-xs text-muted-foreground">
-            <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-success" />API Online</span>
-            <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-success" />Database Online</span>
+            <span className="flex items-center gap-1.5"><span className={`w-2 h-2 rounded-full ${isOnline ? "bg-success" : "bg-destructive"}`} />API {isOnline ? "Online" : "Offline"}</span>
+            <span className="flex items-center gap-1.5"><span className={`w-2 h-2 rounded-full ${isOnline ? "bg-success" : "bg-destructive"}`} />Database {isOnline ? "Online" : "Offline"}</span>
           </div>
           <div className="hidden sm:flex items-center rounded-xl bg-muted p-0.5">
             {THEMES.map((t) => (
