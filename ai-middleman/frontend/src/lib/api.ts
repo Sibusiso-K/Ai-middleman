@@ -1,7 +1,12 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
+// Bypasses ngrok's free-tier browser-warning interstitial page, which
+// otherwise replaces every API response with an HTML page when the request
+// carries a normal browser User-Agent (harmless no-op against non-ngrok hosts).
+const NGROK_BYPASS_HEADERS = { "ngrok-skip-browser-warning": "true" };
+
 async function request<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`);
+  const res = await fetch(`${API_BASE}${path}`, { headers: NGROK_BYPASS_HEADERS });
   if (!res.ok) throw new Error(`${path} -> ${res.status}`);
   return res.json() as Promise<T>;
 }
@@ -9,7 +14,7 @@ async function request<T>(path: string): Promise<T> {
 async function post<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...NGROK_BYPASS_HEADERS },
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`${path} -> ${res.status}`);
