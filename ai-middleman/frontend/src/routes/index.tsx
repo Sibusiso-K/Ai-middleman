@@ -63,17 +63,9 @@ function timeAgo(iso: string) {
 function HomePage() {
   const [showOnboarding, setShowOnboarding] = useState(true);
 
-  const summary = useQuery({ queryKey: ["analytics", "summary"], queryFn: api.analyticsSummary });
   const sectors = useQuery({ queryKey: ["analytics", "sectors"], queryFn: api.analyticsSectors });
   const locations = useQuery({ queryKey: ["analytics", "locations"], queryFn: () => api.analyticsLocations(10) });
   const activity = useQuery({ queryKey: ["activity"], queryFn: () => api.activity(6) });
-
-  const kpis = [
-    { label: "Total Contacts", value: summary.data?.total_contacts.toLocaleString() ?? "—", delta: "" },
-    { label: "VIP Contacts", value: summary.data?.vip_contacts.toLocaleString() ?? "—", delta: "" },
-    { label: "Avg Relationship Strength", value: summary.data ? `${summary.data.avg_relationship_strength}` : "—", delta: "of 5.0" },
-    { label: "Sectors Covered", value: summary.data?.sectors_covered ?? "—", delta: "Global" },
-  ];
 
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-6">
@@ -103,16 +95,6 @@ function HomePage() {
           </div>
         </Card>
       )}
-
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {kpis.map((k) => (
-          <Card key={k.label} className="p-5">
-            <div className="text-xs text-muted-foreground">{k.label}</div>
-            <div className="text-3xl font-semibold tabular-nums mt-2">{k.value}</div>
-            <div className="text-xs text-muted-foreground mt-1">{k.delta}</div>
-          </Card>
-        ))}
-      </div>
 
       <Card className="p-5">
         <SectionHeader title="Today" subtitle="Live activity across the middleman pipeline" />
