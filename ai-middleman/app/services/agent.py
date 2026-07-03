@@ -147,11 +147,13 @@ TRUTHFULNESS RULES — CRITICAL:
 - If the user did not specify a location, do NOT mention location at all in your reasoning.
 - Only reference criteria that the user actually asked for.
 
-IMPORTANT: Be discriminating. It is better to return 2-3 strong matches than 5 weak ones. If no contact scores above 0.5, set match_quality to "weak". If none score above 0.3, set match_quality to "none" and ask a clarifying question.
+IMPORTANT: Be discriminating. Return at most the top 3 matches, not 5 — quality over quantity. If no contact scores above 0.5, set match_quality to "weak". If none score above 0.3, set match_quality to "none" and ask a clarifying question.
+
+Keep all text SHORT — this is read on a phone. Be concise everywhere.
 
 Respond ONLY with this exact JSON structure:
 {{
-    "analysis": "2-3 sentences explaining what the user needs and what you looked for. Only mention location if the user asked for one.",
+    "analysis": "One short sentence on what the user needs. Only mention location if the user asked for one.",
     "matches": [
         {{
             "contact_id": 123,
@@ -160,14 +162,14 @@ Respond ONLY with this exact JSON structure:
             "company": "Company Name",
             "location": "Location",
             "confidence": 0.85,
-            "reasoning": "Specific explanation referencing this contact's actual skills and why they fit THIS request. Only mention location if the user asked for a specific location. Minimum 2 sentences. Be truthful — do not claim requirements that weren't stated."
+            "reasoning": "One concise sentence (max ~25 words) on why this contact fits THIS request. Only mention location if the user asked for a specific location. Be truthful — do not claim requirements that weren't stated."
         }}
     ],
     "match_quality": "good",
     "clarification_question": ""
 }}
 
-Sort matches by confidence score descending. Maximum 5 matches. Only include contacts scoring above 0.3."""
+Sort matches by confidence score descending. Maximum 3 matches. Only include contacts scoring above 0.3."""
 
     def _fallback_response(self) -> Dict[str, Any]:
         return {

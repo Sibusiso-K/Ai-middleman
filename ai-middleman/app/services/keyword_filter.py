@@ -69,7 +69,7 @@ class KeywordFilter:
                     location_score DESC,
                     is_vip DESC,
                     relationship_strength DESC
-                LIMIT 50
+                LIMIT 25
             """
             async with self.db_pool.acquire() as conn:
                 results = await conn.fetch(sql, regex_pattern, location_pattern)
@@ -96,7 +96,7 @@ class KeywordFilter:
                 ORDER BY
                     is_vip DESC,
                     relationship_strength DESC
-                LIMIT 50
+                LIMIT 25
             """
             async with self.db_pool.acquire() as conn:
                 results = await conn.fetch(sql, regex_pattern)
