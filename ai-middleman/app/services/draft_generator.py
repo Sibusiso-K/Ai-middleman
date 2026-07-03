@@ -13,17 +13,16 @@ from typing import List, Dict, Any
 from dotenv import load_dotenv
 from pathlib import Path
 
-from app.services.llm_provider import get_chat_config, using_groq
+from app.services.llm_provider import get_chat_configs, using_groq
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 
 class DraftGenerator:
     def __init__(self):
-        config = get_chat_config()
-        self.api_key = config["api_key"]
-        self.api_url = config["api_url"]
-        self.model = config["model"]
+        # Groq first (fast) when configured, Featherless as a fallback if
+        # Groq's free-tier rate limit is exhausted mid-session.
+        self.configs = get_chat_configs()
         default_timeout = "10" if using_groq() else "30"
         self.timeout = float(os.getenv("DRAFT_TIMEOUT_SECONDS", default_timeout))
         self.max_attempts = int(os.getenv("DRAFT_MAX_ATTEMPTS", "3"))
@@ -76,39 +75,40 @@ Do NOT start with Hi or Hello — jump straight in.
 Do NOT include any contact phone numbers or emails.
 Sound genuine, personal, and confident."""
 
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-        json_payload = {
-            "model": self.model,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.7,
-            "max_tokens": 200,
-        }
+        for config in self.configs:
+            headers = {
+                "Authorization": f"Bearer {config['api_key']}",
+                "Content-Type": "application/json",
+            }
+            json_payload = {
+                "model": config["model"],
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.7,
+                "max_tokens": 200,
+            }
 
-        for attempt in range(1, self.max_attempts + 1):
-            try:
-                async with httpx.AsyncClient() as client:
-                    response = await client.post(
-                        self.api_url, headers=headers, json=json_payload, timeout=self.timeout
-                    )
-                if response.status_code == 200:
-                    draft = response.json()["choices"][0]["message"]["content"].strip()
-                    from app.log_safe import slog
-                    slog(f"[Draft] Generated (attempt {attempt}): {draft[:100]}...")
-                    return draft
-                # Retry rate-limits / server errors; give up on other 4xx.
-                print(f"[Draft] API error {response.status_code} (attempt {attempt}/{self.max_attempts})")
-                if response.status_code < 500 and response.status_code != 429:
-                    break
-            except (httpx.TimeoutException, httpx.TransportError) as e:
-                print(f"[Draft] transient error (attempt {attempt}/{self.max_attempts}): {type(e).__name__}: {e!r}")
+            for attempt in range(1, self.max_attempts + 1):
+                try:
+                    async with httpx.AsyncClient() as client:
+                        response = await client.post(
+                            config["api_url"], headers=headers, json=json_payload, timeout=self.timeout
+                        )
+                    if response.status_code == 200:
+                        draft = response.json()["choices"][0]["message"]["content"].strip()
+                        from app.log_safe import slog
+                        slog(f"[Draft/{config['name']}] Generated (attempt {attempt}): {draft[:100]}...")
+                        return draft
+                    # Retry rate-limits / server errors; give up on other 4xx.
+                    print(f"[Draft/{config['name']}] API error {response.status_code} (attempt {attempt}/{self.max_attempts})")
+                    if response.status_code < 500 and response.status_code != 429:
+                        break
+                except (httpx.TimeoutException, httpx.TransportError) as e:
+                    print(f"[Draft/{config['name']}] transient error (attempt {attempt}/{self.max_attempts}): {type(e).__name__}: {e!r}")
 
-            if attempt < self.max_attempts:
-                await asyncio.sleep(self.backoff_base * attempt)
+                if attempt < self.max_attempts:
+                    await asyncio.sleep(self.backoff_base * attempt)
 
-        # All attempts failed — return a graceful, natural fallback so Alex still
-        # gets something to send rather than an error.
-        print("[Draft] all attempts failed — returning fallback line")
+        # All providers exhausted — return a graceful, natural fallback so Alex
+        # still gets something to send rather than an error.
+        print("[Draft] all providers exhausted — returning fallback line")
         return "Hey! I've got some great people in mind for this — let me get back to you shortly 🤝"

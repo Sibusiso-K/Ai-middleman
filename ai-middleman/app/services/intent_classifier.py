@@ -12,7 +12,7 @@ import os
 from dotenv import load_dotenv
 from pathlib import Path
 
-from app.services.llm_provider import get_chat_config, using_groq
+from app.services.llm_provider import get_chat_configs, using_groq
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
@@ -25,10 +25,9 @@ class IntentClassificationError(Exception):
 
 class IntentClassifier:
     def __init__(self):
-        config = get_chat_config()
-        self.api_key = config["api_key"]
-        self.api_url = config["api_url"]
-        self.model = config["model"]
+        # Groq first (fast) when configured, Featherless as a fallback if
+        # Groq's free-tier rate limit is exhausted mid-session.
+        self.configs = get_chat_configs()
         # Featherless can run ~8-10s/call when warming up; Groq is much faster
         # but keep headroom for retries either way.
         default_timeout = "10" if using_groq() else "30"
@@ -75,40 +74,41 @@ Message: "{message}"
 
 Reply with only YES or NO."""
 
-        payload = {
-            "model": self.model,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.1,
-            "max_tokens": 5,
-        }
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-
         last_error = None
-        for attempt in range(1, self.max_attempts + 1):
-            try:
-                async with httpx.AsyncClient() as client:
-                    response = await client.post(
-                        self.api_url, headers=headers, json=payload, timeout=self.timeout
-                    )
-                if response.status_code == 200:
-                    answer = response.json()["choices"][0]["message"]["content"].strip().upper()
-                    print(f"[Intent] Classified as: {answer} (attempt {attempt})")
-                    return answer.startswith("YES")
-                # Retry server-side/rate-limit errors; give up on other 4xx.
-                last_error = f"HTTP {response.status_code}"
-                print(f"[Intent] API error {response.status_code} (attempt {attempt}/{self.max_attempts})")
-                if response.status_code < 500 and response.status_code != 429:
-                    break
-            except (httpx.TimeoutException, httpx.TransportError) as e:
-                last_error = f"{type(e).__name__}: {e!r}"
-                print(f"[Intent] transient error (attempt {attempt}/{self.max_attempts}): {last_error}")
+        for config in self.configs:
+            payload = {
+                "model": config["model"],
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.1,
+                "max_tokens": 5,
+            }
+            headers = {
+                "Authorization": f"Bearer {config['api_key']}",
+                "Content-Type": "application/json",
+            }
 
-            if attempt < self.max_attempts:
-                await asyncio.sleep(self.backoff_base * attempt)
+            for attempt in range(1, self.max_attempts + 1):
+                try:
+                    async with httpx.AsyncClient() as client:
+                        response = await client.post(
+                            config["api_url"], headers=headers, json=payload, timeout=self.timeout
+                        )
+                    if response.status_code == 200:
+                        answer = response.json()["choices"][0]["message"]["content"].strip().upper()
+                        print(f"[Intent/{config['name']}] Classified as: {answer} (attempt {attempt})")
+                        return answer.startswith("YES")
+                    # Retry server-side/rate-limit errors; give up on other 4xx.
+                    last_error = f"HTTP {response.status_code}"
+                    print(f"[Intent/{config['name']}] API error {response.status_code} (attempt {attempt}/{self.max_attempts})")
+                    if response.status_code < 500 and response.status_code != 429:
+                        break
+                except (httpx.TimeoutException, httpx.TransportError) as e:
+                    last_error = f"{type(e).__name__}: {e!r}"
+                    print(f"[Intent/{config['name']}] transient error (attempt {attempt}/{self.max_attempts}): {last_error}")
+
+                if attempt < self.max_attempts:
+                    await asyncio.sleep(self.backoff_base * attempt)
 
         raise IntentClassificationError(
-            f"Intent classification failed after {self.max_attempts} attempts: {last_error}"
+            f"Intent classification failed across all providers: {last_error}"
         )

@@ -18,16 +18,15 @@ from typing import Dict, Any, List
 from dotenv import load_dotenv
 from pathlib import Path
 
-from app.services.llm_provider import get_chat_config, using_groq
+from app.services.llm_provider import get_chat_configs, using_groq
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 class LLMAgent:
     def __init__(self):
-        config = get_chat_config()
-        self.api_key = config["api_key"]
-        self.api_url = config["api_url"]
-        self.model = config["model"]
+        # Ordered list: Groq first (fast) when configured, Featherless as a
+        # fallback if Groq's free-tier rate limit is exhausted mid-session.
+        self.configs = get_chat_configs()
         default_timeout = "15" if using_groq() else "45"
         self.timeout = float(os.getenv("AGENT_TIMEOUT_SECONDS", default_timeout))
         self.max_retries = int(os.getenv("AGENT_MAX_ATTEMPTS", "3"))
@@ -79,42 +78,45 @@ class LLMAgent:
 
         prompt = self._build_prompt(query, candidates)
 
-        for attempt in range(1, self.max_retries + 1):
-            try:
-                async with httpx.AsyncClient() as client:
-                    response = await client.post(
-                        self.api_url,
-                        headers={
-                            "Authorization": f"Bearer {self.api_key}",
-                            "Content-Type": "application/json"
-                        },
-                        json={
-                            "model": self.model,
-                            "messages": [{"role": "user", "content": prompt}],
-                            "max_tokens": 1024,
-                            "temperature": 0.1
-                        },
-                        timeout=self.timeout
-                    )
+        for config in self.configs:
+            for attempt in range(1, self.max_retries + 1):
+                try:
+                    async with httpx.AsyncClient() as client:
+                        response = await client.post(
+                            config["api_url"],
+                            headers={
+                                "Authorization": f"Bearer {config['api_key']}",
+                                "Content-Type": "application/json"
+                            },
+                            json={
+                                "model": config["model"],
+                                "messages": [{"role": "user", "content": prompt}],
+                                "max_tokens": 1024,
+                                "temperature": 0.1
+                            },
+                            timeout=self.timeout
+                        )
 
-                if response.status_code == 200:
-                    content = response.json()["choices"][0]["message"]["content"]
-                    try:
-                        return self._extract_json(content)
-                    except json.JSONDecodeError as e:
-                        # Malformed / non-JSON reply — retry (transient LLM behaviour).
-                        print(f"[Agent] unparseable reply (attempt {attempt}/{self.max_retries}): {e}")
-                elif response.status_code == 429 or response.status_code >= 500:
-                    print(f"[Agent] retryable HTTP {response.status_code} (attempt {attempt}/{self.max_retries})")
-                else:
-                    print(f"[Agent] non-retryable HTTP {response.status_code}: {response.text[:200]}")
-                    return self._fallback_response()
+                    if response.status_code == 200:
+                        content = response.json()["choices"][0]["message"]["content"]
+                        try:
+                            return self._extract_json(content)
+                        except json.JSONDecodeError as e:
+                            # Malformed / non-JSON reply — retry (transient LLM behaviour).
+                            print(f"[Agent/{config['name']}] unparseable reply (attempt {attempt}/{self.max_retries}): {e}")
+                    elif response.status_code == 429 or response.status_code >= 500:
+                        print(f"[Agent/{config['name']}] retryable HTTP {response.status_code} (attempt {attempt}/{self.max_retries})")
+                    else:
+                        print(f"[Agent/{config['name']}] non-retryable HTTP {response.status_code}: {response.text[:200]}")
+                        break  # try the next provider, if any, rather than giving up outright
 
-            except (httpx.TimeoutException, httpx.TransportError) as e:
-                print(f"[Agent] transient error (attempt {attempt}/{self.max_retries}): {type(e).__name__}: {e!r}")
+                except (httpx.TimeoutException, httpx.TransportError) as e:
+                    print(f"[Agent/{config['name']}] transient error (attempt {attempt}/{self.max_retries}): {type(e).__name__}: {e!r}")
 
-            if attempt < self.max_retries:
-                await asyncio.sleep(self.backoff_base * attempt)
+                if attempt < self.max_retries:
+                    await asyncio.sleep(self.backoff_base * attempt)
+
+            print(f"[Agent] {config['name']} exhausted after {self.max_retries} attempts — trying next provider" if config is not self.configs[-1] else f"[Agent] {config['name']} exhausted — no more providers to try")
 
         return self._fallback_response()
 
@@ -172,19 +174,6 @@ IMPORTANT: Be discriminating. Return at most the top 3 matches, not 5 — qualit
 
 Keep all text SHORT — this is read on a phone. Be concise everywhere.
 
-STEP 3 — WRITE ALEX'S REPLY (draft_reply field):
-Alex is a warm, direct, well-connected professional replying on WhatsApp — like texting a
-friend, not a formal system. Write his actual reply to the original request, in his voice:
-- Only reference matches with confidence 0.5 or higher — if none score that high, treat it
-  as no viable match (see below), even if you listed weaker ones in the "matches" array.
-- 2-4 sentences max, no bullet points or numbered lists
-- Don't start with "Hi" or "Hello" — jump straight in
-- Mention the top viable match's name, role, and why they fit
-- Offer to make the introduction personally
-- Never include phone numbers or emails
-- If there is no match at 0.5+ confidence, write an apologetic "let me ask around and
-  get back to you" style line instead — still warm and personal, one or two sentences.
-
 Respond ONLY with this exact JSON structure:
 {{
     "analysis": "One short sentence on what the user needs. Only mention location if the user asked for one.",
@@ -200,8 +189,7 @@ Respond ONLY with this exact JSON structure:
         }}
     ],
     "match_quality": "good",
-    "clarification_question": "",
-    "draft_reply": "Alex's actual WhatsApp reply as described in STEP 3."
+    "clarification_question": ""
 }}
 
 Sort matches by confidence score descending. Maximum 3 matches. Only include contacts scoring above 0.3."""

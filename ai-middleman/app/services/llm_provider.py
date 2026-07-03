@@ -17,19 +17,37 @@ from pathlib import Path
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 
-def get_chat_config() -> dict:
-    """Returns {"api_key", "api_url", "model"} for whichever provider is active."""
-    if os.getenv("GROQ_API_KEY"):
-        return {
-            "api_key": os.getenv("GROQ_API_KEY"),
-            "api_url": os.getenv("GROQ_API_URL", "https://api.groq.com/openai/v1/chat/completions"),
-            "model": os.getenv("GROQ_MODEL", "llama-3.1-8b-instant"),
-        }
+def _groq_config() -> dict:
     return {
+        "name": "groq",
+        "api_key": os.getenv("GROQ_API_KEY"),
+        "api_url": os.getenv("GROQ_API_URL", "https://api.groq.com/openai/v1/chat/completions"),
+        "model": os.getenv("GROQ_MODEL", "llama-3.1-8b-instant"),
+    }
+
+
+def _featherless_config() -> dict:
+    return {
+        "name": "featherless",
         "api_key": os.getenv("FEATHERLESS_API_KEY") or os.getenv("OPENROUTER_API_KEY"),
         "api_url": os.getenv("FEATHERLESS_API_URL", "https://api.featherless.ai/v1/chat/completions"),
         "model": os.getenv("FEATHERLESS_MODEL", "NousResearch/Meta-Llama-3.1-8B-Instruct"),
     }
+
+
+def get_chat_config() -> dict:
+    """Returns {"api_key", "api_url", "model"} for whichever provider is active."""
+    return _groq_config() if os.getenv("GROQ_API_KEY") else _featherless_config()
+
+
+def get_chat_configs() -> list[dict]:
+    """Returns an ordered list of provider configs to try. Groq first (fast)
+    when configured, falling back to Featherless if Groq's free-tier rate
+    limit is exhausted — so a Groq quota ceiling doesn't take down matching
+    for the rest of the day, it just gets slower."""
+    if os.getenv("GROQ_API_KEY") and (os.getenv("FEATHERLESS_API_KEY") or os.getenv("OPENROUTER_API_KEY")):
+        return [_groq_config(), _featherless_config()]
+    return [get_chat_config()]
 
 
 def using_groq() -> bool:
