@@ -20,6 +20,7 @@ The dashboard then polls GET /friend/thread to render the conversation and any
 replies Alex sends back (which arrive via the webhook as alex_reply / draft_*).
 """
 
+import asyncio
 import os
 import re
 from fastapi import APIRouter, Request, BackgroundTasks, UploadFile, File
@@ -121,21 +122,31 @@ async def _handle_details_request(db_pool, thread_id: int, text: str, whatsapp: 
 async def _run_matching_and_push_draft(
     db_pool, thread_id: int, whatsapp: "WhatsAppClient",
     request_text: str, display_text: str, uncertain: bool = False,
+    candidates: list | None = None,
 ):
     """Run the matching+draft pipeline for request_text and push a Send/Skip
     draft to Alex. display_text is what's shown as "{FRIEND_NAME} asked" (may
-    differ from request_text when resolved from a confirmed clarification)."""
+    differ from request_text when resolved from a confirmed clarification).
+    candidates, if provided, skips Stage 1's DB query (already fetched
+    concurrently with intent classification by the caller)."""
     manager = ConversationManager(db_pool)
     engine = MatchingEngine(db_pool)
     emit("matching", f"🔗 Searching contacts for: \"{request_text}\"")
-    result = await engine.match(request_text)
+    result = await engine.match(request_text, candidates=candidates)
     all_matches = result.get("matches", [])
     viable = [m for m in all_matches if m.get("confidence", 0) >= 0.5]
     emit("matching", f"🔗 Found {len(viable)} good match(es)" if viable else "🔗 No confident match found")
 
-    generator = DraftGenerator()
-    emit("drafting", "✍️ Writing a suggested reply")
-    draft = await generator.generate_draft(original_request=request_text, matches=viable)
+    # The matching LLM call already wrote the draft in the same round-trip
+    # (see agent.py's draft_reply field) — only fall back to a second,
+    # separate LLM call if it came back empty for some reason.
+    draft = result.get("draft_reply") or ""
+    if draft:
+        emit("drafting", "✍️ Draft written in the same pass as matching")
+    else:
+        generator = DraftGenerator()
+        emit("drafting", "✍️ Writing a suggested reply")
+        draft = await generator.generate_draft(original_request=request_text, matches=viable)
 
     event_id = await manager.add_event(thread_id, "draft_suggested", {
         "original_message": request_text,
@@ -195,17 +206,27 @@ async def _process_sam_message(db_pool, thread_id: int, text: str):
             )
             return
 
-    # Fail OPEN if the classifier is unreachable, so a genuine ask is never dropped.
+    # Intent classification (LLM) and keyword filtering (DB) don't depend on
+    # each other, but used to run strictly in sequence — kick them off
+    # together so the DB round-trip is hidden inside the LLM call's latency
+    # instead of adding to it. If intent turns out negative, the fetched
+    # candidates are simply discarded (a cheap query to have run for nothing).
     classifier = IntentClassifier()
+    engine = MatchingEngine(db_pool)
     classify_failed = False
     emit("intent", "🧠 Asking the AI: is this a contact request?")
-    try:
-        is_request = await classifier.is_contact_request(text)
-    except IntentClassificationError as e:
-        slog(f"[Friend] Intent classification unavailable, failing open: {e}")
-        emit("intent", "⚠️ AI classifier unreachable — assuming yes, just in case")
-        is_request = True
-        classify_failed = True
+
+    async def _classify():
+        try:
+            return await classifier.is_contact_request(text), False
+        except IntentClassificationError as e:
+            slog(f"[Friend] Intent classification unavailable, failing open: {e}")
+            emit("intent", "⚠️ AI classifier unreachable — assuming yes, just in case")
+            return True, True
+
+    (is_request, classify_failed), candidates = await asyncio.gather(
+        _classify(), engine.keyword_filter.filter_candidates(text)
+    )
 
     if not is_request:
         emit("resolved", "🙅 Not a contact request — nothing to do")
@@ -216,6 +237,7 @@ async def _process_sam_message(db_pool, thread_id: int, text: str):
     await _run_matching_and_push_draft(
         db_pool, thread_id, whatsapp,
         request_text=text, display_text=text, uncertain=classify_failed,
+        candidates=candidates,
     )
 
 

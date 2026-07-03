@@ -31,6 +31,9 @@ class LLMAgent:
         default_timeout = "15" if using_groq() else "45"
         self.timeout = float(os.getenv("AGENT_TIMEOUT_SECONDS", default_timeout))
         self.max_retries = int(os.getenv("AGENT_MAX_ATTEMPTS", "3"))
+        # Backoff was tuned for Featherless's flakiness; Groq is fast and
+        # reliable, so keep worst-case retry latency bounded on that path.
+        self.backoff_base = 1.0 if using_groq() else 3.0
 
     @staticmethod
     def _extract_json(content: str) -> Dict[str, Any]:
@@ -111,7 +114,7 @@ class LLMAgent:
                 print(f"[Agent] transient error (attempt {attempt}/{self.max_retries}): {type(e).__name__}: {e!r}")
 
             if attempt < self.max_retries:
-                await asyncio.sleep(3 * attempt)  # linear backoff: 3s, 6s, …
+                await asyncio.sleep(self.backoff_base * attempt)
 
         return self._fallback_response()
 
@@ -169,6 +172,19 @@ IMPORTANT: Be discriminating. Return at most the top 3 matches, not 5 — qualit
 
 Keep all text SHORT — this is read on a phone. Be concise everywhere.
 
+STEP 3 — WRITE ALEX'S REPLY (draft_reply field):
+Alex is a warm, direct, well-connected professional replying on WhatsApp — like texting a
+friend, not a formal system. Write his actual reply to the original request, in his voice:
+- Only reference matches with confidence 0.5 or higher — if none score that high, treat it
+  as no viable match (see below), even if you listed weaker ones in the "matches" array.
+- 2-4 sentences max, no bullet points or numbered lists
+- Don't start with "Hi" or "Hello" — jump straight in
+- Mention the top viable match's name, role, and why they fit
+- Offer to make the introduction personally
+- Never include phone numbers or emails
+- If there is no match at 0.5+ confidence, write an apologetic "let me ask around and
+  get back to you" style line instead — still warm and personal, one or two sentences.
+
 Respond ONLY with this exact JSON structure:
 {{
     "analysis": "One short sentence on what the user needs. Only mention location if the user asked for one.",
@@ -184,7 +200,8 @@ Respond ONLY with this exact JSON structure:
         }}
     ],
     "match_quality": "good",
-    "clarification_question": ""
+    "clarification_question": "",
+    "draft_reply": "Alex's actual WhatsApp reply as described in STEP 3."
 }}
 
 Sort matches by confidence score descending. Maximum 3 matches. Only include contacts scoring above 0.3."""

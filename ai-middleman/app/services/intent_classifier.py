@@ -34,6 +34,7 @@ class IntentClassifier:
         default_timeout = "10" if using_groq() else "30"
         self.timeout = float(os.getenv("INTENT_TIMEOUT_SECONDS", default_timeout))
         self.max_attempts = int(os.getenv("INTENT_MAX_ATTEMPTS", "3"))
+        self.backoff_base = 0.5 if using_groq() else 1.5
 
     async def is_contact_request(self, message: str) -> bool:
         """
@@ -106,7 +107,7 @@ Reply with only YES or NO."""
                 print(f"[Intent] transient error (attempt {attempt}/{self.max_attempts}): {last_error}")
 
             if attempt < self.max_attempts:
-                await asyncio.sleep(1.5 * attempt)  # linear backoff: 1.5s, 3s, …
+                await asyncio.sleep(self.backoff_base * attempt)
 
         raise IntentClassificationError(
             f"Intent classification failed after {self.max_attempts} attempts: {last_error}"

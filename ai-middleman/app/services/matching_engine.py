@@ -19,10 +19,14 @@ class MatchingEngine:
         self.keyword_filter = KeywordFilter(db_pool)
         self.agent = LLMAgent()
 
-    async def match(self, query: str) -> dict:
-        print(f"[Stage 1] Running keyword filter for: '{query}'")
-        candidates = await self.keyword_filter.filter_candidates(query)
-        print(f"[Stage 1] Found {len(candidates)} candidates")
+    async def match(self, query: str, candidates: list | None = None) -> dict:
+        # Callers that already fetched candidates concurrently with an
+        # independent check (e.g. intent classification) can pass them in
+        # directly, skipping a redundant second DB round-trip.
+        if candidates is None:
+            print(f"[Stage 1] Running keyword filter for: '{query}'")
+            candidates = await self.keyword_filter.filter_candidates(query)
+            print(f"[Stage 1] Found {len(candidates)} candidates")
 
         if not candidates:
             return {
@@ -32,10 +36,13 @@ class MatchingEngine:
                 "match_quality": "none",
                 "matches": [],
                 "formatted_response": "I couldn't find any contacts matching your request. Could you provide more details?",
-                "clarification_question": "I couldn't find any relevant contacts. Could you tell me more about who you are looking for?"
+                "clarification_question": "I couldn't find any relevant contacts. Could you tell me more about who you are looking for?",
+                "draft_reply": "",
             }
 
-        # Stage 2: LLM agent ranks and scores candidates intelligently
+        # Stage 2: LLM agent ranks and scores candidates, and (in the same
+        # call) writes Alex's draft reply — merged to save a whole extra
+        # LLM round-trip that a separate DraftGenerator call would cost.
         print(f"[Stage 2] Running LLM agent for: '{query}'")
         agent_output = await self.agent.evaluate_matches(query, candidates)
         print(f"[Stage 2] LLM returned match_quality={agent_output.get('match_quality', 'unknown')}")
@@ -50,5 +57,6 @@ class MatchingEngine:
             "match_quality": agent_output.get("match_quality", "none"),
             "matches": agent_output.get("matches", []),
             "formatted_response": formatted,
-            "clarification_question": agent_output.get("clarification_question", "")
+            "clarification_question": agent_output.get("clarification_question", ""),
+            "draft_reply": agent_output.get("draft_reply", ""),
         }

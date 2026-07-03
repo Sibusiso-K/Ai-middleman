@@ -27,6 +27,7 @@ class DraftGenerator:
         default_timeout = "10" if using_groq() else "30"
         self.timeout = float(os.getenv("DRAFT_TIMEOUT_SECONDS", default_timeout))
         self.max_attempts = int(os.getenv("DRAFT_MAX_ATTEMPTS", "3"))
+        self.backoff_base = 1.0 if using_groq() else 2.0
 
     async def generate_draft(
         self,
@@ -105,7 +106,7 @@ Sound genuine, personal, and confident."""
                 print(f"[Draft] transient error (attempt {attempt}/{self.max_attempts}): {type(e).__name__}: {e!r}")
 
             if attempt < self.max_attempts:
-                await asyncio.sleep(2 * attempt)  # linear backoff: 2s, 4s, …
+                await asyncio.sleep(self.backoff_base * attempt)
 
         # All attempts failed — return a graceful, natural fallback so Alex still
         # gets something to send rather than an error.
