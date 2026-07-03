@@ -9,12 +9,18 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as PipelineRouteImport } from './routes/pipeline'
 import { Route as MatchingRouteImport } from './routes/matching'
 import { Route as InboxRouteImport } from './routes/inbox'
 import { Route as ContactsRouteImport } from './routes/contacts'
 import { Route as AnalyticsRouteImport } from './routes/analytics'
 import { Route as IndexRouteImport } from './routes/index'
 
+const PipelineRoute = PipelineRouteImport.update({
+  id: '/pipeline',
+  path: '/pipeline',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const MatchingRoute = MatchingRouteImport.update({
   id: '/matching',
   path: '/matching',
@@ -47,6 +53,7 @@ export interface FileRoutesByFullPath {
   '/contacts': typeof ContactsRoute
   '/inbox': typeof InboxRoute
   '/matching': typeof MatchingRoute
+  '/pipeline': typeof PipelineRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -54,6 +61,7 @@ export interface FileRoutesByTo {
   '/contacts': typeof ContactsRoute
   '/inbox': typeof InboxRoute
   '/matching': typeof MatchingRoute
+  '/pipeline': typeof PipelineRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -62,13 +70,22 @@ export interface FileRoutesById {
   '/contacts': typeof ContactsRoute
   '/inbox': typeof InboxRoute
   '/matching': typeof MatchingRoute
+  '/pipeline': typeof PipelineRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/analytics' | '/contacts' | '/inbox' | '/matching'
+  fullPaths:
+    '/' | '/analytics' | '/contacts' | '/inbox' | '/matching' | '/pipeline'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/analytics' | '/contacts' | '/inbox' | '/matching'
-  id: '__root__' | '/' | '/analytics' | '/contacts' | '/inbox' | '/matching'
+  to: '/' | '/analytics' | '/contacts' | '/inbox' | '/matching' | '/pipeline'
+  id:
+    | '__root__'
+    | '/'
+    | '/analytics'
+    | '/contacts'
+    | '/inbox'
+    | '/matching'
+    | '/pipeline'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -77,10 +94,18 @@ export interface RootRouteChildren {
   ContactsRoute: typeof ContactsRoute
   InboxRoute: typeof InboxRoute
   MatchingRoute: typeof MatchingRoute
+  PipelineRoute: typeof PipelineRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/pipeline': {
+      id: '/pipeline'
+      path: '/pipeline'
+      fullPath: '/pipeline'
+      preLoaderRoute: typeof PipelineRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/matching': {
       id: '/matching'
       path: '/matching'
@@ -125,6 +150,7 @@ const rootRouteChildren: RootRouteChildren = {
   ContactsRoute: ContactsRoute,
   InboxRoute: InboxRoute,
   MatchingRoute: MatchingRoute,
+  PipelineRoute: PipelineRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

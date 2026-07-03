@@ -76,6 +76,14 @@ export type ThreadEvent = {
   created_at: string;
 };
 
+export type PipelineEvent = {
+  id: number;
+  ts: number;
+  stage: string;
+  message: string;
+  meta: Record<string, unknown>;
+};
+
 export const api = {
   analyticsSummary: () => request<AnalyticsSummary>("/api/analytics/summary"),
   analyticsSectors: () => request<SectorStat[]>("/api/analytics/sectors"),
@@ -110,5 +118,6 @@ export const api = {
     if (!res.ok) throw new Error(`/friend/send-media -> ${res.status}`);
     return res.json();
   },
+  pipelineEvents: (since = 0) => request<{ events: PipelineEvent[]; since: number }>(`/pipeline/events?since=${since}`),
   health: () => request<{ status: string }>("/health"),
 };
