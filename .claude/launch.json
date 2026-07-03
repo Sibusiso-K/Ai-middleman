@@ -21,9 +21,8 @@
     },
     {
       "name": "frontend",
-      "runtimeExecutable": "C:\\Users\\lovilocal.adm\\AppData\\Local\\node-portable\\node-v20.18.0-win-x64\\npm.cmd",
-      "runtimeArgs": ["run", "dev", "--", "--port", "5174"],
-      "cwd": "ai-middleman/frontend",
+      "runtimeExecutable": "cmd.exe",
+      "runtimeArgs": ["/c", "ai-middleman\\frontend\\run-dev.cmd"],
       "port": 5174
     }
   ]
