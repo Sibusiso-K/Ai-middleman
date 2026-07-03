@@ -58,7 +58,7 @@ test_query.py
 # Large binaries
 *.pdf
 
-# Scaffolded React frontend under active development by a separate process —
-# accidentally committed once (82 files, node_modules-adjacent lockfiles).
-# Remove this line if/when it should actually be tracked in git.
-ai-middleman/frontend/
+# ai-middleman/frontend/ is intentionally tracked (confirmed with the user).
+ai-middleman/frontend/node_modules/
+ai-middleman/frontend/dist/
+ai-middleman/frontend/.vite/
