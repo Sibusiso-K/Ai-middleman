@@ -5,6 +5,7 @@ import { Card, SectionHeader } from "@/components/ui-bits";
 import { api, type ThreadEvent } from "@/lib/api";
 import { ACTIVITY_ICONS, activityText, timeAgo } from "@/lib/activity";
 import { usePipelineFeed, PipelineFlowCompact, PipelineFeed } from "@/components/pipeline-viz";
+import { ResizableSplit } from "@/components/resizable-split";
 import { Sparkles, History, Send, Paperclip, Mic, Square } from "lucide-react";
 
 export const Route = createFileRoute("/inbox")({
@@ -139,9 +140,11 @@ function InboxPage() {
           </Card>
         </div>
       ) : (
-        <div className="flex-1 min-h-0 px-6 pb-6 grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-4">
-          {/* Live pipeline — shown side-by-side with the conversation for demos */}
-          <Card className="flex flex-col min-h-0 overflow-hidden">
+        <div className="flex-1 min-h-0 px-6 pb-6">
+         <ResizableSplit storageKey="inbox-split" defaultFirst={34}>
+          {/* Live pipeline — shown side-by-side with the conversation for demos.
+              Drag the divider (or its stacked counterpart on mobile) to favor one. */}
+          <Card className="flex flex-1 w-full flex-col min-h-0 min-w-0 overflow-hidden">
             <div className="p-3 border-b border-border">
               <SectionHeader title="Live Pipeline" subtitle="What the server is doing right now" />
             </div>
@@ -154,7 +157,7 @@ function InboxPage() {
           </Card>
 
           {/* Conversation */}
-          <Card className="flex flex-col min-h-0 overflow-hidden">
+          <Card className="flex flex-1 w-full flex-col min-h-0 min-w-0 overflow-hidden">
             <div className="h-14 px-4 border-b border-border flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-primary-soft text-primary-soft-foreground grid place-items-center text-xs font-semibold">SA</div>
               <div className="min-w-0">
@@ -243,6 +246,7 @@ function InboxPage() {
               </button>
             </div>
           </Card>
+         </ResizableSplit>
         </div>
       )}
     </div>
