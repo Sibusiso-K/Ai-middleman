@@ -12,7 +12,7 @@ import os
 from dotenv import load_dotenv
 from pathlib import Path
 
-from app.services.llm_provider import get_chat_configs, using_groq
+from app.services.llm_provider import get_chat_configs
 from app.log_safe import slog
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
@@ -29,12 +29,21 @@ class IntentClassifier:
         # Groq first (fast) when configured, Featherless as a fallback if
         # Groq's free-tier rate limit is exhausted mid-session.
         self.configs = get_chat_configs()
-        # Featherless can run ~8-10s/call when warming up; Groq is much faster
-        # but keep headroom for retries either way.
-        default_timeout = "10" if using_groq() else "30"
-        self.timeout = float(os.getenv("INTENT_TIMEOUT_SECONDS", default_timeout))
         self.max_attempts = int(os.getenv("INTENT_MAX_ATTEMPTS", "3"))
-        self.backoff_base = 0.5 if using_groq() else 1.5
+        # Timeout/backoff are per-provider, not fixed once for the whole
+        # instance — otherwise the Featherless fallback silently inherits
+        # Groq's short timeout instead of the longer one it actually needs.
+        self._timeout_override = os.getenv("INTENT_TIMEOUT_SECONDS")
+
+    def _timeout_for(self, config: dict) -> float:
+        # Featherless can run ~8-10s/call when warming up; Groq is much
+        # faster but keep headroom for retries either way.
+        if self._timeout_override:
+            return float(self._timeout_override)
+        return 10.0 if config["name"] == "groq" else 30.0
+
+    def _backoff_for(self, config: dict) -> float:
+        return 0.5 if config["name"] == "groq" else 1.5
 
     async def is_contact_request(self, message: str) -> bool:
         """
@@ -92,7 +101,7 @@ Reply with only YES or NO."""
                 try:
                     async with httpx.AsyncClient() as client:
                         response = await client.post(
-                            config["api_url"], headers=headers, json=payload, timeout=self.timeout
+                            config["api_url"], headers=headers, json=payload, timeout=self._timeout_for(config)
                         )
                     if response.status_code == 200:
                         answer = response.json()["choices"][0]["message"]["content"].strip().upper()
@@ -108,7 +117,7 @@ Reply with only YES or NO."""
                     slog(f"[Intent/{config['name']}] transient error (attempt {attempt}/{self.max_attempts}): {last_error}")
 
                 if attempt < self.max_attempts:
-                    await asyncio.sleep(self.backoff_base * attempt)
+                    await asyncio.sleep(self._backoff_for(config) * attempt)
 
         raise IntentClassificationError(
             f"Intent classification failed across all providers: {last_error}"

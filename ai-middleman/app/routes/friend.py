@@ -69,6 +69,28 @@ def _looks_like_affirmation(text: str) -> bool:
     return bool(_AFFIRMATION_RE.match(text))
 
 
+def _format_history_for_draft(events: list) -> tuple[str, bool]:
+    """Turn recent thread_events into a compact "Sam: ... / Alex: ..." transcript
+    for the draft prompt, skipping pending/system events. Returns (history_text,
+    is_first_message) — is_first_message is True only if no prior turn exists,
+    so the draft prompt knows whether an opening greeting is appropriate."""
+    lines = []
+    for e in events:
+        p = e.get("payload", {})
+        if e["event_type"] == "friend_message":
+            lines.append(f"{FRIEND_NAME}: {p.get('text', '')}")
+        elif e["event_type"] == "draft_sent":
+            lines.append(f"Alex: {p.get('final_text', '')}")
+        elif e["event_type"] == "alex_reply":
+            lines.append(f"Alex: {p.get('text', '')}")
+    # The current message being drafted for is the last friend_message in the
+    # log (already recorded before this runs) — exclude it from "history".
+    if lines and lines[-1].startswith(f"{FRIEND_NAME}:"):
+        lines = lines[:-1]
+    is_first_message = len(lines) == 0
+    return "\n".join(lines[-8:]), is_first_message
+
+
 async def _handle_details_request(db_pool, thread_id: int, text: str, whatsapp: "WhatsAppClient") -> bool:
     """
     If this looks like a follow-up asking for the last-matched contact's
@@ -147,7 +169,14 @@ async def _run_matching_and_push_draft(
     else:
         generator = DraftGenerator()
         emit("drafting", "✍️ Writing a suggested reply")
-        draft = await generator.generate_draft(original_request=request_text, matches=viable)
+        recent_events = await manager.get_recent_events(thread_id, limit=20)
+        history, is_first_message = _format_history_for_draft(recent_events)
+        draft = await generator.generate_draft(
+            original_request=request_text,
+            matches=viable,
+            conversation_history=history,
+            is_first_message=is_first_message,
+        )
 
     event_id = await manager.add_event(thread_id, "draft_suggested", {
         "original_message": request_text,

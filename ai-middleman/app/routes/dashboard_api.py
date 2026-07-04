@@ -187,7 +187,7 @@ async def list_contacts(
                    relationship_strength, is_vip, intros_made
             FROM contacts
             {where}
-            ORDER BY full_name
+            ORDER BY full_name, id
             LIMIT ${len(args) + 1} OFFSET ${len(args) + 2}
             """,
             *args,

@@ -19,7 +19,7 @@ from typing import Dict, Any, List
 from dotenv import load_dotenv
 from pathlib import Path
 
-from app.services.llm_provider import get_chat_configs, using_groq
+from app.services.llm_provider import get_chat_configs
 from app.log_safe import slog
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
@@ -29,12 +29,21 @@ class LLMAgent:
         # Ordered list: Groq first (fast) when configured, Featherless as a
         # fallback if Groq's free-tier rate limit is exhausted mid-session.
         self.configs = get_chat_configs()
-        default_timeout = "15" if using_groq() else "45"
-        self.timeout = float(os.getenv("AGENT_TIMEOUT_SECONDS", default_timeout))
         self.max_retries = int(os.getenv("AGENT_MAX_ATTEMPTS", "3"))
+        # Timeout/backoff are per-provider, not fixed once for the whole
+        # instance — otherwise the Featherless fallback silently inherits
+        # Groq's short timeout instead of the longer one it actually needs.
+        self._timeout_override = os.getenv("AGENT_TIMEOUT_SECONDS")
+
+    def _timeout_for(self, config: dict) -> float:
+        if self._timeout_override:
+            return float(self._timeout_override)
+        return 15.0 if config["name"] == "groq" else 45.0
+
+    def _backoff_for(self, config: dict) -> float:
         # Backoff was tuned for Featherless's flakiness; Groq is fast and
         # reliable, so keep worst-case retry latency bounded on that path.
-        self.backoff_base = 1.0 if using_groq() else 3.0
+        return 1.0 if config["name"] == "groq" else 3.0
 
     @staticmethod
     def _extract_json(content: str) -> Dict[str, Any]:
@@ -96,7 +105,7 @@ class LLMAgent:
                                 "max_tokens": 1024,
                                 "temperature": 0.1
                             },
-                            timeout=self.timeout
+                            timeout=self._timeout_for(config)
                         )
 
                     if response.status_code == 200:
@@ -116,7 +125,7 @@ class LLMAgent:
                     slog(f"[Agent/{config['name']}] transient error (attempt {attempt}/{self.max_retries}): {type(e).__name__}: {e!r}")
 
                 if attempt < self.max_retries:
-                    await asyncio.sleep(self.backoff_base * attempt)
+                    await asyncio.sleep(self._backoff_for(config) * attempt)
 
             slog(f"[Agent] {config['name']} exhausted after {self.max_retries} attempts — trying next provider" if config is not self.configs[-1] else f"[Agent] {config['name']} exhausted — no more providers to try")
 
