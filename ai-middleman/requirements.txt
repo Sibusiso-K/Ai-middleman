@@ -15,14 +15,10 @@ certifi==2026.6.17
 # Environment
 python-dotenv==1.2.2
 
-# Data Processing
+# Data Processing (generate_contacts.py)
 pandas==3.0.3
 openpyxl==3.1.5
 Faker==40.23.0
-
-# Dashboard
-streamlit==1.58.0
-plotly==6.8.0
 
 # Development Tools
 pyngrok==8.1.2

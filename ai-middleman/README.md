@@ -2,47 +2,59 @@
 
 > Automating business connections through intelligent AI matching.
 
-A production-grade WhatsApp bot that receives natural language connection requests and automatically matches them against a database of professional contacts using a two-stage AI pipeline — returning ranked results with confidence scores and reasoning in under 3 seconds.
+A WhatsApp bot that reads natural-language contact requests, matches them against a 50,000-contact database using a two-stage AI pipeline, drafts a reply in the account owner's own voice — and then waits for his real approval (Send / Edit / Skip) before anything reaches the requester. Supports South Africa's 11 official languages, with a React dashboard for live-pipeline visualization and analytics.
 
 ---
 
 ## What It Does
 
-Send a WhatsApp message like:
+A friend messages Alex asking for an introduction, e.g.:
 
 > *"I need a VP of Leveraged Finance in London who specialises in unitranche deals"*
 
-And receive back:
+The system classifies the message, searches Alex's network, ranks the best matches with an LLM, and drafts a reply in Alex's own voice:
 
-> **1. Katherine Chang** — Managing Director at Meridian Growth Partners, London (95%)
-> ✅ Direct match: leveraged finance expertise, London-based, strong relationship
+> *"Hey, I've got just the person — Katherine Chang, Managing Director at Meridian Growth Partners in London. Strong unitranche track record, happy to make the intro."*
 
-Fully automated. No human in the loop.
+That draft is sent to **Alex on his real WhatsApp** with Send / Edit / Skip buttons — nothing goes out to the requester until he approves it. No AI-generated message ever reaches a third party unsupervised.
 
 ---
 
 ## Architecture
 
 ```
-WhatsApp Message
+Friend's WhatsApp message
       │
       ▼
-FastAPI Webhook (app/routes/whatsapp_webhook.py)
+Intent + language classification (app/services/intent_classifier.py)
+      │  Groq Llama 3.1 8B, Featherless fallback · one call detects
+      │  intent, language (11 SA official languages), and an English
+      │  gloss for search
       │
-      ├── Stage 1: Keyword Filter (app/services/keyword_filter.py)
-      │     └── PostgreSQL · 50,000 contacts → 30-50 candidates
-      │     └── Location-aware SQL ordering
+      ├── Not a contact request → nothing happens
       │
-      ├── Stage 2: LLM Agent (app/services/agent.py)
-      │     └── Featherless.ai · Llama 3.1 8B (free tier)
-      │     └── Confidence scoring · Ranked reasoning
+      ▼ Contact request
+Stage 1: Keyword filter (app/services/keyword_filter.py)
+      │  PostgreSQL · 50,000 contacts → ≤25 candidates
       │
-      ├── Response Formatter (app/services/response_formatter.py)
-      │     └── JSON → WhatsApp-ready text
+      ▼
+Stage 2: LLM ranking (app/services/agent.py)
+      │  Confidence scoring · ranked reasoning
       │
-      └── WhatsApp Client (app/services/whatsapp_client.py)
-            └── Meta Graph API · Reply sent
+      ▼
+Draft generation (app/services/draft_generator.py)
+      │  Writes Alex's reply in his own voice and in the sender's language
+      │
+      ▼
+Alex approves on his real WhatsApp (Send / Edit / Skip)
+      │  app/routes/whatsapp_webhook.py handles Alex's response
+      │
+      ▼
+WhatsApp Client (app/services/whatsapp_client.py)
+      Meta Graph API · approved reply sent
 ```
+
+A separate `frontend/` (React + TanStack) talks to `app/routes/dashboard_api.py` for live pipeline visualization, contacts browsing, and analytics — plus a "Sam" simulator (`app/routes/friend.py`) for demoing the friend side of a conversation without a second physical phone.
 
 ---
 
@@ -53,12 +65,13 @@ FastAPI Webhook (app/routes/whatsapp_webhook.py)
 | Database | PostgreSQL | MongoDB | Relational integrity, free self-hosted |
 | API Framework | FastAPI | Flask/Django | Async, fast, auto-docs |
 | DB Driver | asyncpg | SQLAlchemy | Pure async, no ORM overhead |
-| LLM Provider | Featherless.ai | OpenAI/Anthropic | Free tier, Llama 3.1 8B |
+| LLM Provider | Groq (Llama 3.1 8B), Featherless fallback | OpenAI/Anthropic | Groq's LPU hardware is fast + free-tier; Featherless takes over automatically if Groq's rate limit is hit mid-session |
 | Vector Search | ❌ Not used | pgvector | 50k contacts fits in keyword filter |
 | Embeddings | ❌ Not used | SentenceTransformers | Adds memory pressure, not needed |
 | LLM Framework | Raw HTTP | LangChain | Simpler, fewer dependencies |
+| Matching vs. drafting | Two separate LLM calls | One merged "rank + draft" call | The merged prompt got too large for an 8B model with 25 candidates and sometimes returned empty completions — splitting into two focused calls fixed it |
 
-**Why two stages?** Sending 50,000 contacts directly to an LLM is impossible — it would exceed context windows and cost hundreds of dollars per query. The keyword filter reduces the problem to 30-50 candidates, which fit comfortably in a single LLM prompt at zero cost.
+**Why two stages?** Sending 50,000 contacts directly to an LLM is impossible — it would exceed context windows and cost hundreds of dollars per query. The keyword filter reduces the problem to at most 25 candidates, which fit comfortably in a single LLM prompt at zero cost.
 
 ---
 
@@ -67,32 +80,41 @@ FastAPI Webhook (app/routes/whatsapp_webhook.py)
 ```
 ai-middleman/
 ├── app/
-│   ├── main.py                    # FastAPI entrypoint, startup, routes
-│   ├── database.py                # asyncpg connection pool, migration runner
+│   ├── main.py                     # FastAPI entrypoint, startup, /health, /match
+│   ├── database.py                 # asyncpg connection pool, migration runner
 │   ├── models/
-│   │   └── schemas.py             # Pydantic models
+│   │   └── schemas.py              # Pydantic models
 │   ├── routes/
-│   │   └── whatsapp_webhook.py    # Webhook receiver (GET verify + POST handler)
+│   │   ├── whatsapp_webhook.py     # Alex's replies: Send/Edit/Skip + free text
+│   │   ├── friend.py               # "Sam" (the friend) side: /friend/send, /friend/send-media
+│   │   ├── dashboard_api.py        # Contacts, analytics, activity feed for the frontend
+│   │   └── pipeline.py             # Live pipeline event stream for the dashboard
 │   └── services/
-│       ├── keyword_filter.py      # Stage 1: Local keyword + location filter
-│       ├── agent.py               # Stage 2: LLM agent via Featherless.ai
-│       ├── matching_engine.py     # Orchestrates Stage 1 → Stage 2
-│       ├── response_formatter.py  # JSON → WhatsApp text formatter
-│       └── whatsapp_client.py     # Meta Graph API client
-├── data/
-│   └── import_contacts.py         # CSV → PostgreSQL importer
-├── dashboard/
-│   └── app.py                     # Streamlit dashboard (4 pages)
-├── migrations/
-│   └── 001_create_tables.sql      # Database schema
+│       ├── intent_classifier.py    # Intent + language detection + English gloss, one LLM call
+│       ├── keyword_filter.py       # Stage 1: SQL keyword + location filter
+│       ├── agent.py                # Stage 2: LLM ranking (Groq, Featherless fallback)
+│       ├── matching_engine.py      # Orchestrates Stage 1 → Stage 2
+│       ├── draft_generator.py      # Writes Alex's reply, in the sender's language
+│       ├── conversation_manager.py # Thread/event log for multi-turn conversations
+│       ├── response_formatter.py   # JSON → privacy-redacted WhatsApp text
+│       ├── whatsapp_client.py      # Meta Graph API client (text, buttons, Flows)
+│       ├── groq_media.py           # Voice transcription (Whisper) + image description
+│       ├── llm_provider.py         # Picks Groq vs Featherless per call
+│       ├── llm_json.py             # Tolerant JSON parsing for LLM replies
+│       └── sa_languages.py         # South Africa's 11 official languages
+├── frontend/                       # React + TanStack dashboard (the demo surface)
+├── migrations/                     # Numbered SQL migrations, applied in order at startup
 ├── tests/
-│   ├── test_keyword_filter.py     # Keyword filter unit tests
-│   └── test_matching_engine.py    # End-to-end pipeline tests
-├── reports/                       # LaTeX technical report
-├── generate_contacts.py           # Synthetic contact data generator
-├── dev_tunnel.py                  # ngrok tunnel for local webhook testing
-├── docker-compose.yml             # PostgreSQL + Ollama services
-├── .env.example                   # Environment variable template
+│   ├── test_matching.py            # Unit tests: keyword tokenization, response formatting
+│   ├── test_migrations.py          # Spins up a scratch DB, verifies schema shape
+│   ├── eval_set.json               # Labeled intent/matching evaluation cases
+│   └── eval_report.md              # Latest run_eval.py output
+├── scripts/                        # check_db.py, debug_draft.py, simulate_friend_message.py, run_eval.py
+├── reports/                        # LaTeX technical report + presentation prep
+├── generate_contacts.py            # Synthetic contact data generator
+├── dev_tunnel.py                   # ngrok tunnel for local webhook testing
+├── docker-compose.yml              # PostgreSQL service
+├── .env.example                    # Environment variable template
 └── README.md                      # This file
 ```
 
@@ -162,14 +184,15 @@ curl -X POST http://localhost:8000/match \
   -d '{"query": "I need a credit finance specialist in London"}'
 ```
 
-### 7. Start the dashboard (optional)
+### 7. Start the dashboard
 
 ```bash
-cd dashboard
-streamlit run app.py
+cd frontend
+npm install
+npm run dev
 ```
 
-Visit `http://localhost:8501`
+Visit `http://localhost:5174`. This is the live pipeline view, contacts browser, analytics, and the "Sam" friend simulator for demoing without a second phone.
 
 ### 8. Set up WhatsApp webhook (for full end-to-end)
 
@@ -199,22 +222,17 @@ Copy the printed URL and configure it in your Meta Developer dashboard as the Ca
 
 ## Matching Pipeline — How It Works
 
+### Intent + language classification
+One LLM call decides whether the message is a contact request, detects which of South Africa's 11 official languages it's written in (or a natural code-switched mix), and produces an English rendering for search — all in a single round trip, so English messages (the common case) pay no extra latency.
+
 ### Stage 1: Keyword Filter
-Extracts 3+ character tokens from the query and searches across 9 database fields using PostgreSQL regex. Location-aware: queries containing city or country names boost geographically matching contacts to the top of the candidate list before passing to the LLM.
+Extracts 3+ character tokens from the (English-rendered) query and searches across 9 database fields using PostgreSQL regex, capped at 25 candidates. Location-aware: queries containing city or country names boost geographically matching contacts to the top of the candidate list before passing to the LLM.
 
 ### Stage 2: LLM Agent
-Sends the 30-50 candidates to Llama 3.1 8B via Featherless.ai with a structured prompt enforcing strict scoring rules:
+Sends the candidates to Llama 3.1 8B via Groq (Featherless as an automatic fallback) with a structured prompt enforcing scoring rules — location match, role/skill alignment, seniority, relationship strength, and VIP status as a tiebreaker. Only matches at confidence ≥ 0.5 are considered viable.
 
-1. **Location match** (most important) — wrong location caps confidence at 0.6
-2. **Role/skill match** — title, expertise, can_help_with alignment
-3. **Seniority** — Partner/MD preferred over Analyst/Associate
-4. **Relationship strength** — 4-5 preferred over 1-2
-5. **VIP status** — tiebreaker
-
-### Response Formatting
-- **Good match** (>0.7): Returns top 5 with full reasoning and confidence bars
-- **Weak match** (0.4-0.7): Returns top 3 with caveat
-- **No match** (<0.4): Asks a clarifying question
+### Draft generation and approval
+A second, focused LLM call drafts Alex's reply — in the sender's own language, continuing the conversation naturally instead of opening with a generic greeting every time. The draft is sent to Alex's real WhatsApp with Send / Edit / Skip buttons; nothing reaches the requester until he approves it.
 
 ---
 
@@ -228,8 +246,14 @@ Sends the 30-50 candidates to Llama 3.1 8B via Featherless.ai with a structured 
 | `WHATSAPP_ACCESS_TOKEN` | Permanent token from Meta | ✅ |
 | `WHATSAPP_APP_SECRET` | From App Settings → Basic | ✅ |
 | `WHATSAPP_VERIFY_TOKEN` | Any string you choose | ✅ |
-| `FEATHERLESS_API_KEY` | From featherless.ai | ✅ |
-| `OLLAMA_URL` | Local fallback LLM | ❌ |
+| `GROQ_API_KEY` | From console.groq.com/keys — primary LLM provider | ✅ |
+| `FEATHERLESS_API_KEY` | From featherless.ai — automatic fallback if Groq's free-tier rate limit is hit | ✅ (for resilience) |
+| `BUSINESS_PHONE_NUMBER` | Your Cloud API number | ✅ |
+| `ALEX_WHATSAPP_NUMBER` | The account owner's real WhatsApp number | ✅ |
+| `WHATSAPP_EDIT_FLOW_ID` | Enables the in-chat "Edit draft" Flow form | ❌ |
+| `NGROK_DOMAIN` / `NGROK_AUTHTOKEN` | For `dev_tunnel.py` during local development | ❌ |
+
+See `.env.example` for the full list, including per-service LLM timeout/retry tuning.
 
 ---
 
@@ -238,11 +262,13 @@ Sends the 30-50 candidates to Llama 3.1 8B via Featherless.ai with a structured 
 | Component | Cost |
 |---|---|
 | PostgreSQL (self-hosted) | $0 |
-| LLM API (Featherless.ai free tier) | $0 |
+| LLM API (Groq + Featherless free tiers) | $0 |
 | Hosting (Oracle Cloud Free Tier) | $0 |
 | WhatsApp Business API | $0–3/month |
 | Domain + SSL | $1/month |
 | **Total** | **$1–4/month** |
+
+Free-tier LLM APIs are the main scaling constraint today — a paid tier or self-hosted model is the natural next step if usage grows beyond what Groq/Featherless's free rate limits comfortably support.
 
 ---
 
@@ -250,8 +276,12 @@ Sends the 30-50 candidates to Llama 3.1 8B via Featherless.ai with a structured 
 
 ```bash
 pip install pytest pytest-asyncio
-pytest tests/ -v
+pytest tests/test_matching.py -v      # Unit tests: tokenization, response formatting
+python scripts/test_migrations.py     # Spins up a scratch DB, verifies schema shape
+python scripts/run_eval.py            # Labeled intent/matching accuracy (needs the API running)
 ```
+
+`run_eval.py` measures real accuracy against a labeled test set (`tests/eval_set.json`) instead of relying on ad hoc manual testing — see `tests/eval_report.md` for the latest run. Both test suites above run automatically in CI on every push (see `.github/workflows/tests.yml`).
 
 ---
 
@@ -260,8 +290,9 @@ pytest tests/ -v
 - [x] Phase 1: PostgreSQL database, 50,000 contacts, FastAPI foundation
 - [x] Phase 2: Two-stage matching engine (keyword filter + LLM agent)
 - [x] Phase 3: WhatsApp Business API integration, end-to-end message flow
-- [ ] Phase 4: Oracle Cloud deployment, SSL, permanent webhook, monitoring
-- [ ] Phase 5: Feedback loop, contact scoring over time, admin dashboard
+- [x] Phase 4: Human-in-the-loop approval (Send/Edit/Skip), React dashboard, labeled evaluation harness, CI
+- [x] Phase 5: Multilingual support for South Africa's 11 official languages (architecture complete; only 2 of 11 languages tested end-to-end so far — see `/reports`)
+- [ ] Phase 6: Larger, native-speaker-reviewed evaluation set covering all 11 languages; paid/self-hosted LLM tier for production scale
 
 ---
 
@@ -275,9 +306,10 @@ A full LaTeX technical report documenting the architecture, design decisions, de
 
 - [FastAPI](https://fastapi.tiangolo.com/) — API framework
 - [asyncpg](https://magicstack.github.io/asyncpg/) — PostgreSQL async driver
-- [Featherless.ai](https://featherless.ai/) — LLM API (Llama 3.1 8B)
+- [Groq](https://groq.com/) — primary LLM inference (Llama 3.1 8B), fast free-tier hardware
+- [Featherless.ai](https://featherless.ai/) — automatic LLM fallback
 - [Meta WhatsApp Business Cloud API](https://developers.facebook.com/docs/whatsapp) — Messaging
 - [PostgreSQL](https://www.postgresql.org/) — Database
 - [Docker](https://www.docker.com/) — Containerisation
-- [Streamlit](https://streamlit.io/) — Dashboard
+- [React](https://react.dev/) + [TanStack](https://tanstack.com/) — Dashboard
 - [ngrok](https://ngrok.com/) — Local webhook tunneling (dev only)
