@@ -22,6 +22,9 @@ async def init_db() -> None:
     if pool is None:
         pool = await asyncpg.create_pool(DATABASE_URL)
         async with pool.acquire() as conn:
+            # Fail loudly at startup on a bad DATABASE_URL, rather than
+            # surfacing the error later on the first real query.
+            await conn.fetchval("SELECT 1")
             migrations_dir = BASE_DIR / "migrations"
             migration_files = sorted(migrations_dir.glob("*.sql"))
             for migration_path in migration_files:

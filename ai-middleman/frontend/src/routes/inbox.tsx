@@ -2,8 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, SectionHeader } from "@/components/ui-bits";
-import { AUDIT_LOG } from "@/lib/mock-data";
 import { api, type ThreadEvent } from "@/lib/api";
+import { ACTIVITY_ICONS, activityText, timeAgo } from "@/lib/activity";
 import { usePipelineFeed, PipelineFlowCompact, PipelineFeed } from "@/components/pipeline-viz";
 import { Sparkles, History, Send, Paperclip, Mic, Square } from "lucide-react";
 
@@ -53,6 +53,13 @@ function InboxPage() {
       queryClient.invalidateQueries({ queryKey: ["friend-thread"] });
     },
     onError: (e: Error) => setMediaError(e.message),
+  });
+  // Real audit trail — the most recent thread events, only fetched when the
+  // Audit tab is open. (Replaces the old hardcoded mock AUDIT_LOG.)
+  const activityQuery = useQuery({
+    queryKey: ["activity"],
+    queryFn: () => api.activity(25),
+    enabled: tab === "audit",
   });
 
   const events = threadQuery.data?.events ?? [];
@@ -107,17 +114,28 @@ function InboxPage() {
       {tab === "audit" ? (
         <div className="px-6 pb-6">
           <Card className="p-5">
-            <ul className="divide-y divide-border">
-              {AUDIT_LOG.map((a, i) => (
-                <li key={i} className="py-3 flex items-center gap-3 text-sm">
-                  <div className="w-8 h-8 rounded-full bg-accent grid place-items-center text-xs font-semibold text-accent-foreground shrink-0">{a.who[0]}</div>
-                  <div className="flex-1 min-w-0">
-                    <div><span className="font-medium">{a.who}</span> <span className="text-muted-foreground">{a.action.toLowerCase()}</span> {a.subject}</div>
-                    <div className="text-xs text-muted-foreground">{a.time}</div>
-                  </div>
-                </li>
-              ))}
-            </ul>
+            {activityQuery.isLoading ? (
+              <div className="py-6 text-sm text-muted-foreground">Loading activity…</div>
+            ) : activityQuery.isError ? (
+              <div className="py-6 text-sm text-destructive">Couldn't load the audit trail. Is the backend running?</div>
+            ) : !activityQuery.data?.length ? (
+              <div className="py-6 text-sm text-muted-foreground">No activity yet — send a request below to get started.</div>
+            ) : (
+              <ul className="divide-y divide-border">
+                {activityQuery.data.map((a, i) => {
+                  const Icon = ACTIVITY_ICONS[a.event_type] ?? Sparkles;
+                  return (
+                    <li key={i} className="py-3 flex items-center gap-3 text-sm">
+                      <div className="w-8 h-8 rounded-full bg-accent grid place-items-center text-accent-foreground shrink-0">
+                        <Icon className="w-4 h-4" />
+                      </div>
+                      <div className="flex-1 min-w-0 truncate">{activityText(a)}</div>
+                      <div className="text-xs text-muted-foreground shrink-0">{timeAgo(a.created_at)}</div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </Card>
         </div>
       ) : (

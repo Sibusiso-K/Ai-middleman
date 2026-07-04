@@ -2,8 +2,8 @@
 keyword_filter.py — Stage 1 of the two-stage matching pipeline.
 
 Performs fast, local keyword-based filtering of the contact database,
-reducing 50,000 contacts to 30-50 candidates before LLM evaluation.
-Location-aware: queries containing city/country names prioritise
+reducing 50,000 contacts to at most CANDIDATE_LIMIT candidates before LLM
+evaluation. Location-aware: queries containing city/country names prioritise
 geographically matching contacts in the result ordering.
 
 Exposed: KeywordFilter class with filter_candidates(query) method.
@@ -12,6 +12,11 @@ Exposed: KeywordFilter class with filter_candidates(query) method.
 import re
 from typing import List, Dict
 import asyncpg
+
+# Max candidates passed to the LLM ranker. Kept small enough to keep the
+# Stage-2 prompt within reliable single-response size for an 8B model.
+CANDIDATE_LIMIT = 25
+
 
 class KeywordFilter:
     def __init__(self, db_pool: asyncpg.Pool):
@@ -42,7 +47,7 @@ class KeywordFilter:
         if has_location:
             # Location-aware query: prioritise location matches strongly
             location_pattern = "|".join(location_tokens)
-            sql = """
+            sql = f"""
                 SELECT
                     id, contact_id, full_name, phone, email, company, title,
                     sector, specialty, location, seniority, expertise_tags,
@@ -69,13 +74,13 @@ class KeywordFilter:
                     location_score DESC,
                     is_vip DESC,
                     relationship_strength DESC
-                LIMIT 25
+                LIMIT {CANDIDATE_LIMIT}
             """
             async with self.db_pool.acquire() as conn:
                 results = await conn.fetch(sql, regex_pattern, location_pattern)
         else:
             # No location in query: use standard ordering
-            sql = """
+            sql = f"""
                 SELECT
                     id, contact_id, full_name, phone, email, company, title,
                     sector, specialty, location, seniority, expertise_tags,
@@ -96,7 +101,7 @@ class KeywordFilter:
                 ORDER BY
                     is_vip DESC,
                     relationship_strength DESC
-                LIMIT 25
+                LIMIT {CANDIDATE_LIMIT}
             """
             async with self.db_pool.acquire() as conn:
                 results = await conn.fetch(sql, regex_pattern)

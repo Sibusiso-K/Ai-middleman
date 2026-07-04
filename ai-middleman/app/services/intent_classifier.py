@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 
 from app.services.llm_provider import get_chat_configs, using_groq
+from app.log_safe import slog
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
@@ -95,16 +96,16 @@ Reply with only YES or NO."""
                         )
                     if response.status_code == 200:
                         answer = response.json()["choices"][0]["message"]["content"].strip().upper()
-                        print(f"[Intent/{config['name']}] Classified as: {answer} (attempt {attempt})")
+                        slog(f"[Intent/{config['name']}] Classified as: {answer} (attempt {attempt})")
                         return answer.startswith("YES")
                     # Retry server-side/rate-limit errors; give up on other 4xx.
                     last_error = f"HTTP {response.status_code}"
-                    print(f"[Intent/{config['name']}] API error {response.status_code} (attempt {attempt}/{self.max_attempts})")
+                    slog(f"[Intent/{config['name']}] API error {response.status_code} (attempt {attempt}/{self.max_attempts})")
                     if response.status_code < 500 and response.status_code != 429:
                         break
                 except (httpx.TimeoutException, httpx.TransportError) as e:
                     last_error = f"{type(e).__name__}: {e!r}"
-                    print(f"[Intent/{config['name']}] transient error (attempt {attempt}/{self.max_attempts}): {last_error}")
+                    slog(f"[Intent/{config['name']}] transient error (attempt {attempt}/{self.max_attempts}): {last_error}")
 
                 if attempt < self.max_attempts:
                     await asyncio.sleep(self.backoff_base * attempt)

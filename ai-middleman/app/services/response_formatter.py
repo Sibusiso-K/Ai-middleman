@@ -10,7 +10,7 @@ Exposed: format_response(agent_output) -> str
 from typing import Dict, Any
 
 
-def _sanitize_reasoning(reasoning: str, contact_name: str, contact_id) -> str:
+def _sanitize_reasoning(reasoning: str, contact_name: str, contact_id: int) -> str:
     """
     Replace any occurrence of the contact's real name in the reasoning text
     with the reference code to maintain privacy.

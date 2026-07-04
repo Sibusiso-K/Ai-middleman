@@ -95,7 +95,7 @@ async def main():
         "conversation_state": 5,
         "introduction_requests": 9,
         "threads": 5,
-        "thread_events": 4,
+        "thread_events": 5,
     }
 
     for table_name, expected_count in expected_columns.items():

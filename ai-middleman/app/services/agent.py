@@ -1,10 +1,11 @@
 """
 agent.py — Stage 2 of the two-stage matching pipeline.
 
-Sends the 30-50 candidates from the keyword filter to an LLM (Featherless.ai
-hosting Llama 3.1 8B) for intelligent ranking. The LLM evaluates each candidate
-against the user's query using strict scoring rules and returns ranked matches
-with confidence scores and human-readable reasoning.
+Sends the keyword filter's candidates (up to CANDIDATE_LIMIT, currently 25) to
+an LLM (Groq's Llama 3.1 8B, with a Featherless fallback) for intelligent
+ranking. The LLM evaluates each candidate against the user's query using strict
+scoring rules and returns ranked matches with confidence scores and
+human-readable reasoning.
 
 Exposed: LLMAgent class with evaluate_matches(query, candidates) method.
 """
@@ -19,6 +20,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 
 from app.services.llm_provider import get_chat_configs, using_groq
+from app.log_safe import slog
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
@@ -103,20 +105,20 @@ class LLMAgent:
                             return self._extract_json(content)
                         except json.JSONDecodeError as e:
                             # Malformed / non-JSON reply — retry (transient LLM behaviour).
-                            print(f"[Agent/{config['name']}] unparseable reply (attempt {attempt}/{self.max_retries}): {e}")
+                            slog(f"[Agent/{config['name']}] unparseable reply (attempt {attempt}/{self.max_retries}): {e}")
                     elif response.status_code == 429 or response.status_code >= 500:
-                        print(f"[Agent/{config['name']}] retryable HTTP {response.status_code} (attempt {attempt}/{self.max_retries})")
+                        slog(f"[Agent/{config['name']}] retryable HTTP {response.status_code} (attempt {attempt}/{self.max_retries})")
                     else:
-                        print(f"[Agent/{config['name']}] non-retryable HTTP {response.status_code}: {response.text[:200]}")
+                        slog(f"[Agent/{config['name']}] non-retryable HTTP {response.status_code}: {response.text[:200]}")
                         break  # try the next provider, if any, rather than giving up outright
 
                 except (httpx.TimeoutException, httpx.TransportError) as e:
-                    print(f"[Agent/{config['name']}] transient error (attempt {attempt}/{self.max_retries}): {type(e).__name__}: {e!r}")
+                    slog(f"[Agent/{config['name']}] transient error (attempt {attempt}/{self.max_retries}): {type(e).__name__}: {e!r}")
 
                 if attempt < self.max_retries:
                     await asyncio.sleep(self.backoff_base * attempt)
 
-            print(f"[Agent] {config['name']} exhausted after {self.max_retries} attempts — trying next provider" if config is not self.configs[-1] else f"[Agent] {config['name']} exhausted — no more providers to try")
+            slog(f"[Agent] {config['name']} exhausted after {self.max_retries} attempts — trying next provider" if config is not self.configs[-1] else f"[Agent] {config['name']} exhausted — no more providers to try")
 
         return self._fallback_response()
 

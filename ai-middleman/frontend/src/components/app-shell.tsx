@@ -2,7 +2,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Home, Inbox, Sparkles, Users, BarChart3, Search, ChevronsLeft, ChevronsRight, Handshake,
+  Home, Inbox, Sparkles, Users, BarChart3, ChevronsLeft, ChevronsRight, Handshake,
 } from "lucide-react";
 import { useTheme, type Theme } from "@/lib/theme";
 import { api } from "@/lib/api";
@@ -90,16 +90,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="flex-1 min-w-0 flex flex-col pb-16 md:pb-0">
         {/* Top bar */}
         <header className="h-14 shrink-0 flex items-center gap-3 px-4 md:px-6 border-b border-border bg-surface/60 backdrop-blur">
-          <div className="relative flex-1 max-w-lg">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input
-              placeholder="Search contacts, threads, requests…"
-              className="w-full h-9 pl-9 pr-16 rounded-xl bg-muted border border-transparent text-sm placeholder:text-muted-foreground focus:outline-none focus:border-ring"
-            />
-            <kbd className="hidden sm:inline-flex absolute right-2 top-1/2 -translate-y-1/2 items-center gap-1 rounded-md bg-surface px-1.5 py-0.5 text-[10px] text-muted-foreground border border-border">
-              ⌘K
-            </kbd>
-          </div>
+          <div className="flex-1" />
           <div className="hidden lg:flex items-center gap-3 text-xs text-muted-foreground">
             <span className="flex items-center gap-1.5"><span className={`w-2 h-2 rounded-full ${isOnline ? "bg-success" : "bg-destructive"}`} />API {isOnline ? "Online" : "Offline"}</span>
             <span className="flex items-center gap-1.5"><span className={`w-2 h-2 rounded-full ${isOnline ? "bg-success" : "bg-destructive"}`} />Database {isOnline ? "Online" : "Offline"}</span>

@@ -4,7 +4,7 @@ import { useMutation } from "@tanstack/react-query";
 import { Card } from "@/components/ui-bits";
 import { EXAMPLE_QUERIES } from "@/lib/mock-data";
 import { api, type MatchResult } from "@/lib/api";
-import { Sparkles, Send, X, Loader2 } from "lucide-react";
+import { Sparkles, X, Loader2 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Cell } from "recharts";
 
 export const Route = createFileRoute("/matching")({
@@ -117,9 +117,6 @@ function MatchingPage() {
                       <span className={`rounded-full px-2.5 py-1 text-xs font-semibold tabular-nums ${score >= 85 ? "bg-success/20 text-success" : score >= 70 ? "bg-warning/20 text-warning" : "bg-muted text-muted-foreground"}`}>
                         {score}%
                       </span>
-                      <button className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-muted hover:bg-accent hover:text-accent-foreground text-xs font-medium">
-                        <Send className="w-3 h-3" /> Send to Sam
-                      </button>
                     </div>
                   </div>
                 </Card>

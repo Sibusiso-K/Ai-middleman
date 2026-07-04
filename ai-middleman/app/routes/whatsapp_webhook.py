@@ -90,7 +90,7 @@ async def receive_webhook(request: Request):
     try:
         data = json.loads(payload.decode("utf-8", errors="replace"))
     except (ValueError, AttributeError) as e:
-        print(f"[Webhook] Could not parse body as JSON: {e}")
+        slog(f"[Webhook] Could not parse body as JSON: {e}")
         return {"status": "ignored"}
 
     if not isinstance(data, dict) or data.get("object") != "whatsapp_business_account":
@@ -102,7 +102,9 @@ async def receive_webhook(request: Request):
                 if change.get("field") == "messages":
                     await route_message(request.app.state.db_pool, change["value"])
     except Exception as e:
-        print(f"[ERROR] Webhook processing error: {e}")
+        # Include the exception type so failures are diagnosable from logs
+        # without needing a full traceback.
+        slog(f"[ERROR] Webhook processing error: {type(e).__name__}: {e}")
 
     return {"status": "received"}
 
@@ -153,7 +155,7 @@ async def route_message(db_pool, value: dict):
     else:
         return
 
-    print(f"[Route] From Alex ({sender}): {text[:80]}")
+    slog(f"[Route] From Alex ({sender}): {text[:80]}")
 
     pending = await manager.get_latest_pending_draft(thread_id)
 
@@ -181,11 +183,11 @@ async def _transcribe_media(message: dict, msg_type: str) -> str | None:
         content, mime_type = await WhatsAppClient().download_media(media_id)
         if msg_type == "audio":
             text = await transcribe_audio(content)
-            print(f"[Media] Transcribed voice note: {text[:100]}")
+            slog(f"[Media] Transcribed voice note: {text[:100]}")
             return f"🎙️ {text}"
         else:
             text = await describe_image(content, mime_type)
-            print(f"[Media] Described image: {text[:100]}")
+            slog(f"[Media] Described image: {text[:100]}")
             return f"🖼️ {text}"
     except MediaTranscriptionError as e:
         slog(f"[Media] Could not process {msg_type} from Alex: {e}")
@@ -250,7 +252,7 @@ async def handle_flow_reply(manager, thread_id, nfm_reply: dict):
     try:
         response = json.loads(nfm_reply.get("response_json", "{}"))
     except json.JSONDecodeError:
-        print(f"[Flow] Could not parse response_json: {nfm_reply.get('response_json')!r}")
+        slog(f"[Flow] Could not parse response_json: {nfm_reply.get('response_json')!r}")
         return
 
     edited_text = (response.get("edited_text") or "").strip()

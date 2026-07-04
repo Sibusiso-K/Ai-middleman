@@ -15,6 +15,8 @@ import certifi
 from dotenv import load_dotenv
 from pathlib import Path
 
+from app.log_safe import slog
+
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 # SSL verification: use certifi bundle, or disable if on restricted network
@@ -35,9 +37,9 @@ class WhatsAppClient:
         self.phone_number_id = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
         self.access_token = os.getenv("WHATSAPP_ACCESS_TOKEN")
         print(f"[DEBUG] Using Phone Number ID: {self.phone_number_id}")
+        # Log only the token length, never any fragment of it — even partial
+        # token bytes in logs are a leak risk.
         print(f"[DEBUG] WhatsApp token length: {len(self.access_token) if self.access_token else 0}")
-        print(f"[DEBUG] WhatsApp token start: {self.access_token[:30] if self.access_token else 'NONE'}")
-        print(f"[DEBUG] WhatsApp token end: {self.access_token[-10:] if self.access_token else 'NONE'}")
         self.api_url = f"https://graph.facebook.com/v21.0/{self.phone_number_id}/messages"
 
     async def send_message(self, to: str, text: str) -> dict:
@@ -56,7 +58,7 @@ class WhatsAppClient:
             response = await client.post(self.api_url, headers=headers, json=payload, timeout=15.0)
 
             if response.status_code != 200:
-                print(f"WhatsApp send error: {response.status_code} {response.text}")
+                slog(f"WhatsApp send error: {response.status_code} {response.text}")
                 return {"error": response.status_code, "body": response.text}
 
             try:
@@ -121,7 +123,7 @@ class WhatsAppClient:
             response = await client.post(self.api_url, headers=headers, json=payload, timeout=15.0)
 
             if response.status_code != 200:
-                print(f"WhatsApp interactive send error: {response.status_code} {response.text}")
+                slog(f"WhatsApp interactive send error: {response.status_code} {response.text}")
                 return {"error": response.status_code, "body": response.text}
 
             try:
@@ -185,7 +187,7 @@ class WhatsAppClient:
             response = await client.post(self.api_url, headers=headers, json=payload, timeout=15.0)
 
             if response.status_code != 200:
-                print(f"WhatsApp flow send error: {response.status_code} {response.text}")
+                slog(f"WhatsApp flow send error: {response.status_code} {response.text}")
                 return {"error": response.status_code, "body": response.text}
 
             try:

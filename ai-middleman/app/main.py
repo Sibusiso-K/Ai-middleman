@@ -32,12 +32,10 @@ from .routes.dashboard_api import router as dashboard_api_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup token check
+    # Startup token check — log only the length, never any fragment of the token.
     token = os.getenv("WHATSAPP_ACCESS_TOKEN", "NOT_FOUND")
     print(f"[STARTUP] WHATSAPP_ACCESS_TOKEN length: {len(token)}")
-    print(f"[STARTUP] Token start: {token[:30]}")
-    print(f"[STARTUP] Token end: {token[-10:]}")
-    
+
     await init_db()
     app.state.db_pool = await get_db()
     print("Database connected successfully!")

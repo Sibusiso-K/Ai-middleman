@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 
 from app.services.llm_provider import get_chat_configs, using_groq
+from app.log_safe import slog
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
@@ -95,20 +96,19 @@ Sound genuine, personal, and confident."""
                         )
                     if response.status_code == 200:
                         draft = response.json()["choices"][0]["message"]["content"].strip()
-                        from app.log_safe import slog
                         slog(f"[Draft/{config['name']}] Generated (attempt {attempt}): {draft[:100]}...")
                         return draft
                     # Retry rate-limits / server errors; give up on other 4xx.
-                    print(f"[Draft/{config['name']}] API error {response.status_code} (attempt {attempt}/{self.max_attempts})")
+                    slog(f"[Draft/{config['name']}] API error {response.status_code} (attempt {attempt}/{self.max_attempts})")
                     if response.status_code < 500 and response.status_code != 429:
                         break
                 except (httpx.TimeoutException, httpx.TransportError) as e:
-                    print(f"[Draft/{config['name']}] transient error (attempt {attempt}/{self.max_attempts}): {type(e).__name__}: {e!r}")
+                    slog(f"[Draft/{config['name']}] transient error (attempt {attempt}/{self.max_attempts}): {type(e).__name__}: {e!r}")
 
                 if attempt < self.max_attempts:
                     await asyncio.sleep(self.backoff_base * attempt)
 
         # All providers exhausted — return a graceful, natural fallback so Alex
         # still gets something to send rather than an error.
-        print("[Draft] all providers exhausted — returning fallback line")
+        slog("[Draft] all providers exhausted — returning fallback line")
         return "Hey! I've got some great people in mind for this — let me get back to you shortly 🤝"

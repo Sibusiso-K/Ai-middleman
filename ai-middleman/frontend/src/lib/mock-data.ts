@@ -186,13 +186,6 @@ export const ACTIVITY = [
   { icon: "match", text: "AI matched David Cohen for a JHB legal request", time: "5h ago" },
 ];
 
-export const AUDIT_LOG = [
-  { who: "Sam", action: "Approved", subject: "Reply to James Whitfield", time: "10:44 · today" },
-  { who: "Sam", action: "Edited & sent", subject: "Reply to Marcus Fischer", time: "09:12 · today" },
-  { who: "Sam", action: "Rejected", subject: "Suggested match for Priya Sharma", time: "yesterday" },
-  { who: "Sam", action: "Approved", subject: "Reply to Jonas Fischer", time: "yesterday" },
-];
-
 export const EXAMPLE_QUERIES = [
   "VP Leveraged Finance in London, unitranche focus",
   "Corporate lawyer in Johannesburg, cross-border M&A",

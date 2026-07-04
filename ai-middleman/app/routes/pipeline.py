@@ -13,6 +13,7 @@ router = APIRouter()
 
 @router.get("/pipeline/events")
 async def pipeline_events(since: int = Query(0)):
+    """Return pipeline-stage events newer than `since`, plus the new cursor to poll from next."""
     events = events_since(since)
     next_since = events[-1]["id"] if events else since
     return {"events": events, "since": next_since}

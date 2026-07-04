@@ -8,19 +8,6 @@
       "port": 8000
     },
     {
-      "name": "dashboard",
-      "runtimeExecutable": "cmd.exe",
-      "runtimeArgs": ["/c", "ai-middleman\\dashboard\\run-dev.cmd"],
-      "port": 8501,
-      "autoPort": true
-    },
-    {
-      "name": "web",
-      "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "http.server", "5173", "--directory", "ai-middleman/web"],
-      "port": 5173
-    },
-    {
       "name": "frontend",
       "runtimeExecutable": "cmd.exe",
       "runtimeArgs": ["/c", "ai-middleman\\frontend\\run-dev.cmd"],

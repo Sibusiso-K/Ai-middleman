@@ -7,7 +7,8 @@ import {
 import { Card, SectionHeader } from "@/components/ui-bits";
 import { SECTORS } from "@/lib/mock-data";
 import { api } from "@/lib/api";
-import { CheckCircle2, Circle, X, Sparkles, MessageSquareText, UserPlus, ArrowUpRight } from "lucide-react";
+import { ACTIVITY_ICONS, activityText, timeAgo } from "@/lib/activity";
+import { CheckCircle2, Circle, X, Sparkles, ArrowUpRight } from "lucide-react";
 
 export const Route = createFileRoute("/")({
   head: () => ({ meta: [{ title: "Home · AI Middleman" }] }),
@@ -18,46 +19,10 @@ const CHECKLIST = [
   { label: "Connect OpenAI API key", done: true },
   { label: "Configure WhatsApp webhook", done: true },
   { label: "Import contact database", done: true },
-  { label: "Invite reviewers to Inbox", done: false },
 ];
-
-const ICONS: Record<string, typeof Sparkles> = {
-  draft_suggested: MessageSquareText,
-  friend_message: UserPlus,
-  alex_reply: Sparkles,
-  draft_sent: CheckCircle2,
-  draft_skipped: X,
-};
 
 function sectorColor(name: string) {
   return SECTORS.find((s) => s.name === name)?.color ?? SECTORS[0].color;
-}
-
-function activityText(e: { event_type: string; payload: Record<string, any> }) {
-  switch (e.event_type) {
-    case "friend_message":
-      return `Sam asked: "${e.payload.text}"`;
-    case "draft_suggested":
-      return `AI drafted a reply — "${(e.payload.original_message ?? "").toString().slice(0, 60)}"`;
-    case "draft_sent":
-      return "Draft sent to the requester";
-    case "draft_skipped":
-      return "Draft skipped by Alex";
-    case "alex_reply":
-      return `Alex replied: "${e.payload.text}"`;
-    default:
-      return e.event_type;
-  }
-}
-
-function timeAgo(iso: string) {
-  const diffMs = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diffMs / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
 }
 
 function HomePage() {
@@ -78,8 +43,8 @@ function HomePage() {
         <Card className="p-5">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
-              <h3 className="font-semibold">Finish setting up</h3>
-              <p className="text-sm text-muted-foreground mt-0.5">A few things left before AI Middleman is fully wired to your WhatsApp workspace.</p>
+              <h3 className="font-semibold">You're all set</h3>
+              <p className="text-sm text-muted-foreground mt-0.5">AI Middleman is wired to your WhatsApp workspace and ready to go.</p>
               <ul className="mt-4 space-y-2">
                 {CHECKLIST.map((c) => (
                   <li key={c.label} className="flex items-center gap-2 text-sm">
@@ -105,7 +70,7 @@ function HomePage() {
         ) : (
           <ul className="divide-y divide-border">
             {activity.data.map((a, i) => {
-              const Icon = ICONS[a.event_type] ?? Sparkles;
+              const Icon = ACTIVITY_ICONS[a.event_type] ?? Sparkles;
               return (
                 <li key={i} className="py-3 flex items-center gap-3">
                   <div className="w-8 h-8 rounded-xl bg-accent grid place-items-center shrink-0">

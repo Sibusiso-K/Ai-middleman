@@ -19,6 +19,7 @@ function ContactsPage() {
   const [q, setQ] = useState("");
   const [sector, setSector] = useState<string | null>(null);
   const [location, setLocation] = useState<string | null>(null);
+  const [seniority, setSeniority] = useState<string | null>(null);
   const [vipOnly, setVipOnly] = useState(false);
   const [showFilters, setShowFilters] = useState(true);
   const [page, setPage] = useState(1);
@@ -27,8 +28,8 @@ function ContactsPage() {
 
   const filterOptions = useQuery({ queryKey: ["filters"], queryFn: api.filterOptions });
   const contactsQuery = useQuery({
-    queryKey: ["contacts", { q, sector, location, vipOnly, page }],
-    queryFn: () => api.contacts({ search: q || undefined, sector: sector ?? undefined, location: location ?? undefined, vip: vipOnly || undefined, page, pageSize }),
+    queryKey: ["contacts", { q, sector, location, seniority, vipOnly, page }],
+    queryFn: () => api.contacts({ search: q || undefined, sector: sector ?? undefined, location: location ?? undefined, seniority: seniority ?? undefined, vip: vipOnly || undefined, page, pageSize }),
   });
   const detailQuery = useQuery({
     queryKey: ["contact", selected?.id],
@@ -84,7 +85,14 @@ function ContactsPage() {
               <div className="text-xs font-medium text-muted-foreground mb-2">Seniority</div>
               <div className="space-y-1.5 text-sm">
                 {(filterOptions.data?.seniorities ?? []).map((s) => (
-                  <label key={s} className="flex items-center gap-2"><input type="checkbox" className="accent-current" /> {s}</label>
+                  <label key={s} className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="accent-current"
+                      checked={seniority === s}
+                      onChange={() => { setSeniority(seniority === s ? null : s); setPage(1); }}
+                    /> {s}
+                  </label>
                 ))}
               </div>
             </div>
