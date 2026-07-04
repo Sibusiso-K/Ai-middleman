@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, SectionHeader } from "@/components/ui-bits";
 import { api, type ThreadEvent } from "@/lib/api";
@@ -31,6 +31,7 @@ function InboxPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
 
   const threadQuery = useQuery({
@@ -67,6 +68,13 @@ function InboxPage() {
   const draft = lastDraft(events);
   const pending = isPending(events);
   const pipeline = usePipelineFeed();
+
+  // Keep the conversation pinned to the newest message — on first load and
+  // whenever a new event arrives (the poll refetches every 2s).
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [events.length, tab]);
 
   function handleFileChosen(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -165,7 +173,7 @@ function InboxPage() {
                 <div className="text-xs text-muted-foreground">Relayed live over WhatsApp</div>
               </div>
             </div>
-            <div className="flex-1 overflow-y-auto p-6 space-y-3 bg-surface-2/40">
+            <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 space-y-3 bg-surface-2/40">
               {threadQuery.isLoading ? (
                 <div className="text-sm text-muted-foreground text-center py-8">Loading conversation…</div>
               ) : threadQuery.isError ? (
