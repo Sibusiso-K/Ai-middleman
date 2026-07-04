@@ -1,0 +1,41 @@
+{
+  "_notes": "Labeled evaluation set for the AI Middleman pipeline. Phrased deliberately differently from the few-shot examples baked into intent_classifier.py's prompt, so this measures generalization rather than memorized examples.",
+
+  "intent": [
+    {"text": "Any solid corporate lawyers you know in Frankfurt?", "expected": true},
+    {"text": "Who's good for private equity out in New York?", "expected": true},
+    {"text": "Need someone senior in real estate finance based in Dubai", "expected": true},
+    {"text": "hey can u connect me w a healthcare vc in boston", "expected": true},
+    {"text": "any leveraged finance ppl in london u kno", "expected": true},
+    {"text": "Trying to raise a Series A - know good fintech investors?", "expected": true},
+    {"text": "My company needs an M&A advisor, any names?", "expected": true},
+    {"text": "Who should I talk to about structured credit in Hong Kong?", "expected": true},
+    {"text": "Hiring a CFO soon, anyone spring to mind?", "expected": true},
+    {"text": "Could you put me in touch with someone at Kirkland & Ellis?", "expected": true},
+    {"text": "Yo what's good", "expected": false},
+    {"text": "Movie night this weekend still on?", "expected": false},
+    {"text": "Appreciate you covering for me at the meeting", "expected": false},
+    {"text": "Ring me later, I'm swamped rn", "expected": false},
+    {"text": "Crazy how the markets are behaving lately huh", "expected": false},
+    {"text": "Confirmed", "expected": false},
+    {"text": "haha no way, that's wild", "expected": false},
+    {"text": "Congrats on the promotion!!", "expected": false},
+    {"text": "Watched the match last night, wild finish", "expected": false},
+    {"text": "Running behind, be there in 10", "expected": false}
+  ],
+
+  "matching": [
+    {"query": "I need a leveraged finance MD in London for a mid-market buyout", "expected_sector": "Finance", "expected_location_contains": "London"},
+    {"query": "Find me a direct lending specialist in Dubai", "expected_sector": "Finance", "expected_location_contains": "Dubai"},
+    {"query": "Connect me with an M&A lawyer at a top firm in London", "expected_sector": "Legal/Professional Services", "expected_location_contains": "London"},
+    {"query": "Find a healthcare venture capital principal in Boston", "expected_sector": "Healthcare", "expected_location_contains": "Boston"},
+    {"query": "Need an energy infrastructure investor in Amsterdam", "expected_sector": "Energy", "expected_location_contains": "Amsterdam"},
+    {"query": "Looking for an investment banking VP in Singapore", "expected_sector": "Finance", "expected_location_contains": "Singapore"},
+    {"query": "Connect me with a private credit principal in Mumbai", "expected_sector": "Finance", "expected_location_contains": "Mumbai"},
+    {"query": "Find a corporate lawyer at Kirkland & Ellis", "expected_sector": "Legal/Professional Services", "expected_company_contains": "Kirkland"},
+    {"query": "Real estate investment chairman in Dubai", "expected_sector": "Real Estate", "expected_location_contains": "Dubai"},
+    {"query": "Tech CTO in Zurich", "expected_sector": "Tech", "expected_location_contains": "Zurich", "_note": "unseen combo - generalization check"},
+    {"query": "Recruiting partner in Tel Aviv", "expected_sector": "Recruiting/Other", "expected_location_contains": "Tel Aviv", "_note": "unseen combo - generalization check"},
+    {"query": "Someone in Johannesburg who does corporate law", "expected_location_contains": null, "_note": "Johannesburg isn't in the seed dataset - correct behavior is an honest low-confidence/no-match, NOT a hallucinated JHB contact"}
+  ]
+}

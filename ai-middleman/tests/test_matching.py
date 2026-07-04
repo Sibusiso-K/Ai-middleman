@@ -102,7 +102,10 @@ class TestResponseFormatter:
             "clarification_question": ""
         }
         formatted = format_response(llm_result)
-        assert "John Doe" in formatted
+        # Real contact names are redacted for privacy (see response_formatter.py's
+        # _sanitize_reasoning) — only the reference code should appear.
+        assert "Ref: C-1" in formatted
+        assert "John Doe" not in formatted
         assert "Credit Analyst" in formatted
         assert "Big Bank" in formatted
         assert "London, UK" in formatted
@@ -127,7 +130,8 @@ class TestResponseFormatter:
             "clarification_question": ""
         }
         formatted = format_response(llm_result)
-        assert "Jane Smith" in formatted
+        assert "Ref: C-2" in formatted
+        assert "Jane Smith" not in formatted
         assert "Manager" in formatted
         assert "Small Co" in formatted
         assert "Paris, France" in formatted
@@ -158,9 +162,10 @@ class TestResponseFormatter:
             "clarification_question": ""
         }
         formatted = format_response(llm_result)
-        assert "A" in formatted
-        assert "B" in formatted
-        assert "C" in formatted
+        # Real names are redacted; check each contact appears via its ref code.
+        assert "Ref: C-1" in formatted
+        assert "Ref: C-2" in formatted
+        assert "Ref: C-3" in formatted
         assert "90%" in formatted
         assert "80%" in formatted
         assert "70%" in formatted
@@ -187,7 +192,8 @@ class TestResponseFormatter:
             "clarification_question": ""
         }
         formatted = format_response(llm_result)
-        assert "VIP Person" in formatted
+        assert "Ref: C-1" in formatted
+        assert "VIP Person" not in formatted
         assert "99%" in formatted
 
 
@@ -216,7 +222,8 @@ class TestMatchingPipeline:
             "clarification_question": ""
         }
         formatted = format_response(llm_result)
-        assert "Test User" in formatted
+        assert "Ref: C-99" in formatted
+        assert "Test User" not in formatted
         assert "CEO at TestCorp" in formatted
         assert "TestCity" in formatted
         assert "88%" in formatted
