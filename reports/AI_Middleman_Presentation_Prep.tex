@@ -175,10 +175,11 @@ This is the biggest live-demo risk, and it was directly stress-tested (Section~\
 3 & Timeout/backoff computed once at construction from ``is Groq configured,'' so the Featherless fallback silently inherited Groq's much shorter values & \badc{Resilience --- undermined the fallback's whole purpose} & \good{Fixed} --- now computed per-provider inside the retry loop; verified live under a real Groq 429 \\
 4 & \texttt{/api/contacts} pagination had no tiebreaker on \texttt{ORDER BY full\_name} --- theoretically non-deterministic under certain Postgres query plans (confirmed via \texttt{EXPLAIN}: filtered queries fall back to \texttt{Bitmap Heap Scan + Sort}, and Postgres sort is not guaranteed stable) & Correctness (latent) & \good{Fixed} --- added \texttt{id} as secondary sort key \\
 5 & 50k-contact seed data has $\sim$20\% duplicate names (Faker collision at scale, e.g.\ ``Michael Smith'' $\times$27), clustering together on alphabetically-sorted pages & Data quality, cosmetic & \warnc{Documented, not fixed} --- your call whether it matters before the demo \\
-6 & Image description hardcodes ``in plain English,'' blocking multilingual image support & Functional gap & \warnc{Documented, not fixed} \\
+6 & Image description hardcoded ``in plain English,'' blocking multilingual image support & Functional gap & \good{Fixed} --- see Section~\ref{sec:multilingual} \\
 7 & ngrok tunnel has no auto-restart --- died silently mid-session, dashboard falsely showed ``offline'' even though the API and DB were healthy the whole time (both badges are driven by one \texttt{/health} check, not independent DB verification) & Operational & Restarted; no supervisor added \\
 8 & No automated evaluation harness existed for intent/matching/draft quality before this week & \badc{The single biggest gap for a data-science-role narrative} & \good{Now exists} --- see Section~\ref{sec:eval} \\
 9 & Entire pipeline depends on two free-tier LLM APIs with no paid/self-hosted fallback & Production risk & Known, by design (budget constraint) \\
+10 & Stage 1 (keyword filter) is a plain SQL keyword match against English contact data --- a non-English message would match nothing, so Stage 2's ranking never even saw candidates, regardless of how good it was & \badc{Was the real blocker for multilingual support, not the draft/image issues above} & \good{Fixed} --- see Section~\ref{sec:multilingual} \\
 \bottomrule
 \end{longtable}
 
@@ -228,33 +229,53 @@ Confusion: TP=10, FP=0, TN=10, FN=0. Messages were phrased deliberately \emph{di
     \item The thread/event data model is the right abstraction for multi-turn conversation state.
     \item A real small-model failure mode (the merged rank+draft prompt) was diagnosed and fixed with the right engineering response --- split it.
     \item The fallback-provider chain shows resilience thinking, even though it took a live stress test to reveal it wasn't actually validated end-to-end.
+    \item Multilingual support was traced to its real root cause --- Stage 1's keyword filter, not the more obvious draft/image-prompt issues --- and fixed with zero added latency for the common English case (Section~\ref{sec:multilingual}).
 \end{itemize}
 
 \subsection{What caps it at 7, not 9--10}
 \begin{itemize}
     \item \textbf{No evaluation harness existed until this week.} Even now it's a small, self-authored labeled set --- not independently blind, not adversarial, not benchmarked against production-scale message diversity.
     \item \textbf{The resilience bug found during testing} means the fallback path --- the thing meant to prevent an outage --- had never actually been exercised end-to-end before being tested this week. ``We built the safety net but never tested it holds weight'' is worth naming honestly if asked how reliability is validated.
-    \item \textbf{No multilingual support yet}, despite this being a South African contact network --- a real functional gap for the actual target market.
+    \item \textbf{Multilingual support is now real but unevenly verified.} It works architecturally for all 11 languages, but only two have actually been tested end-to-end --- Afrikaans came back fluent, isiZulu had real grammatical rough edges. No eval-harness coverage and no native-speaker verification exist yet for any of the 11.
     \item \textbf{Everything rides on two free-tier APIs} with no paid or self-hosted fallback --- fine for a vac project, a real constraint to name plainly if asked how this would scale.
 \end{itemize}
 
 None of these are embarrassing --- they are exactly the kind of gaps a strong junior candidate is expected to name unprompted. Doing that, instead of pretending the project is finished, will land far better with the room than overselling it.
 
-\section{Multilingual roadmap (South Africa's 11 official languages) --- not yet implemented}
+\section{Multilingual support for South Africa's 11 official languages}
+\label{sec:multilingual}
 
-\textbf{Current state:}
+\textbf{Implemented and live-tested.} The real blocker turned out not to be the draft or image prompts --- it was Stage 1 (the keyword filter), a plain SQL keyword match against English contact data. A message in isiZulu would match nothing in that search regardless of how well Stage 2's LLM could reason about it, so Stage 2 never even got candidates to rank. Fixing that, not just the more visible symptoms, was the actual engineering problem.
+
+\subsection{What was built}
 \begin{itemize}
-    \item \textbf{Voice notes:} Whisper already auto-detects language and transcribes in that language --- no code change needed for basic function. Expect strong results for English/Afrikaans, workable results for isiZulu/isiXhosa/Sesotho, and materially weaker accuracy for isiNdebele, Xitsonga, Tshivenda, siSwati, Sepedi, Setswana --- these are lower-resource languages for \emph{every} open transcription model, not a bug in this codebase.
-    \item \textbf{Image transcription:} hardcodes ``describe this image \dots\ in plain English'' --- an easy, safe fix (remove that phrase) not yet applied.
-    \item \textbf{Text replies:} nothing currently detects the incoming message's language or asks the model to reply in kind --- every prompt in the pipeline is English-only today.
+    \item \textbf{One combined LLM call, not three.} \texttt{IntentClassifier.classify()} now returns intent, detected language, and an English rendering of the message in a single call --- the same call that already ran, just returning richer JSON instead of plain YES/NO. \textbf{No extra network round trip was added.}
+    \item \textbf{Stage 1 re-runs only when needed.} If the detected language isn't English, the keyword filter re-runs on the English rendering --- one cheap extra SQL query (Stage 1 has no LLM call in it), so English messages, the common case today, pay nothing extra in latency.
+    \item \textbf{Replies match the sender's language}, with natural code-switching for English contact names and company names --- the same way South Africans actually speak, not a stiff full translation.
+    \item \textbf{Image descriptions no longer force English.} The vision prompt's hardcoded ``in plain English'' instruction was removed; any text found in an image (e.g.\ a business-card note) is transcribed verbatim in its own language, not translated.
+    \item \textbf{Voice notes already worked} --- Whisper auto-detects language and transcribes in it, no code change needed --- and now, because voice/image messages funnel through the exact same classify-and-reply pipeline as typed text, they automatically inherit the same language handling with zero extra code.
 \end{itemize}
 
-\textbf{The plan, if asked ``what's next'':}
-\begin{enumerate}
-    \item Detect the language of the incoming message and instruct the draft model to reply in kind, code-switching naturally with English company/role names (mirrors how South Africans actually speak).
-    \item Drop the hardcoded ``in plain English'' in the image description prompt.
-    \item Test each language once with a native or near-native speaker before claiming full support --- an 8B model's fluency in Xitsonga or Tshivenda is genuinely uncertain, and claiming ``full support for all 11 languages'' without verifying even one example in the weaker languages is a real credibility risk with this specific audience.
-\end{enumerate}
+\subsection{Live test results --- the honest version}
+\begin{longtable}{@{}p{2.2cm}p{6.8cm}p{6.5cm}@{}}
+\toprule
+Language & Detected \& translated for search & Draft quality \\
+\midrule
+\endhead
+Afrikaans & Correct --- e.g.\ ``Ken jy iemand wat 'n regsgeleerde is in Londen?'' correctly rendered as ``Do you know anyone who is a corporate lawyer in London?'' & \good{Fluent and natural}, with correct code-switching (contact and company names kept in English inside the Afrikaans sentence) \\
+isiZulu & Correct --- language and intent both identified correctly, English rendering was accurate & \warnc{Rough} --- real grammatical and lexical issues visible in the live output, consistent with an 8B model having materially weaker isiZulu fluency than Afrikaans or English \\
+\bottomrule
+\end{longtable}
+
+\textbf{The honest takeaway, worth saying out loud if asked:} the \emph{architecture} now supports all 11 languages equally --- detection, search, and reply-in-kind all work the same way regardless of which language is used. \emph{Output quality} does not --- it tracks how much training data each language had in the underlying model, which is a well-documented, industry-wide limitation of every open LLM, not something fixable in this codebase. Expect this same pattern (Afrikaans/English strong, isiXhosa/Sesotho workable, isiNdebele/Xitsonga/Tshivenda/siSwati/Sepedi/Setswana weaker) across the remaining 9 untested languages, based on the same training-data asymmetry that explains the Afrikaans/isiZulu gap actually observed.
+
+\subsection{What's still open}
+\begin{itemize}
+    \item Only 2 of the 11 languages have been tested end-to-end so far --- the rest are architecturally supported but unverified.
+    \item No native-speaker review of any translation or draft has been done yet.
+    \item The evaluation harness (Section~\ref{sec:eval}) doesn't yet include multilingual test cases --- adding a handful, ideally reviewed by a native speaker, would close the biggest remaining gap in this feature's credibility.
+    \item The static ``no match found'' fallback string is deliberately still English-only --- translating it into 10 more languages without a native speaker to check each one risked shipping wrong phrasing for an edge case, so it was left alone rather than guessed at.
+\end{itemize}
 
 \section{Anticipated Q\&A cheat sheet}
 \label{sec:qa}
@@ -270,7 +291,8 @@ Question & Your answer \\
 ``What's your accuracy?'' & 100\% intent accuracy and 100\% matching relevance on a 32-case labeled test set I built --- real numbers, small sample, not a large-scale benchmark. \\
 ``How would this scale?'' & The webhook already keys conversations by sender number, so many concurrent friends are supported structurally. The real constraint is the two free-tier LLM APIs --- a paid tier or self-hosted model would be the next step. \\
 ``What's the biggest risk in this design?'' & Everything depends on free-tier LLM APIs with rate limits; the fallback chain exists but had a real bug (fixed this week) where it silently used the wrong timeout for the backup provider. \\
-``What would you build next?'' & An evaluation harness with a larger, ideally human-labeled test set, and multilingual support for South Africa's 11 official languages --- both are scoped and neither is implemented yet. \\
+``Does it support South Africa's 11 languages?'' & Architecturally, yes --- detection, translation-for-search, and reply-in-kind all work regardless of which language is used, verified live for Afrikaans and isiZulu. Quality is not uniform: Afrikaans came back fluent, isiZulu had real grammatical rough edges --- an 8B model's fluency tracks how much training data each language had, which is a known industry-wide limitation, not something I can fix in this codebase. \\
+``What would you build next?'' & A larger, ideally human-labeled evaluation set covering all 11 languages with native-speaker review, plus scaling the existing English-only eval set to more real-world message diversity --- both are scoped, and the multilingual pipeline itself is already built and working, just under-tested. \\
 ``Does Alex have full control?'' & Yes --- every single reply is gated behind Alex approving Send/Edit/Skip on his real WhatsApp. No AI-generated text reaches a third party unsupervised. \\
 \bottomrule
 \end{longtable}
