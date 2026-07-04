@@ -13,13 +13,13 @@ Exposed: LLMAgent class with evaluate_matches(query, candidates) method.
 import httpx
 import os
 import json
-import re
 import asyncio
 from typing import Dict, Any, List
 from dotenv import load_dotenv
 from pathlib import Path
 
 from app.services.llm_provider import get_chat_configs
+from app.services.llm_json import extract_json
 from app.log_safe import slog
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
@@ -44,39 +44,6 @@ class LLMAgent:
         # Backoff was tuned for Featherless's flakiness; Groq is fast and
         # reliable, so keep worst-case retry latency bounded on that path.
         return 1.0 if config["name"] == "groq" else 3.0
-
-    @staticmethod
-    def _extract_json(content: str) -> Dict[str, Any]:
-        """Parse the model's reply into JSON, tolerating markdown fences,
-        surrounding prose, trailing commas, and stray unescaped quotes inside
-        string values (Llama-family models occasionally echo a candidate's
-        raw comment/name text verbatim, breaking strict JSON)."""
-        text = (content or "").strip()
-        if text.startswith("```"):
-            # strip ```json … ``` fences
-            text = text.split("```", 2)[1] if text.count("```") >= 2 else text.strip("`")
-            if text.lstrip().lower().startswith("json"):
-                text = text.lstrip()[4:]
-
-        candidates = [text]
-        start, end = text.find("{"), text.rfind("}")
-        if start != -1 and end > start:
-            candidates.append(text[start:end + 1])
-
-        last_error = None
-        for candidate in candidates:
-            for variant in (candidate, LLMAgent._strip_trailing_commas(candidate)):
-                try:
-                    return json.loads(variant)
-                except json.JSONDecodeError as e:
-                    last_error = e
-        raise last_error
-
-    @staticmethod
-    def _strip_trailing_commas(text: str) -> str:
-        """Removes trailing commas before a closing } or ] — a common
-        malformed-JSON pattern from smaller instruction-tuned models."""
-        return re.sub(r",(\s*[}\]])", r"\1", text)
 
     async def evaluate_matches(self, query: str, candidates: List[Dict]) -> Dict[str, Any]:
         if not candidates:
@@ -111,7 +78,7 @@ class LLMAgent:
                     if response.status_code == 200:
                         content = response.json()["choices"][0]["message"]["content"]
                         try:
-                            return self._extract_json(content)
+                            return extract_json(content)
                         except json.JSONDecodeError as e:
                             # Malformed / non-JSON reply — retry (transient LLM behaviour).
                             slog(f"[Agent/{config['name']}] unparseable reply (attempt {attempt}/{self.max_retries}): {e}")

@@ -1,9 +1,14 @@
 """
-intent_classifier.py — Detects whether an incoming WhatsApp message is a 
-contact request that Alex should act on.
+intent_classifier.py — Detects whether an incoming WhatsApp message is a
+contact request that Alex should act on, and in which language it was
+written.
 
-Uses a lightweight LLM call to classify intent before running the full
-matching pipeline. Returns True for contact requests, False for everything else.
+Friends may write to Alex in English or in any of South Africa's other 10
+official languages (or a natural code-switched mix). classify() does intent
+detection, language detection, and an English gloss of the message in a
+single LLM call — no extra round trip is added for the common English case,
+and the English gloss lets Stage 1's keyword filter (a plain SQL match
+against English contact data) work correctly for non-English messages too.
 """
 
 import asyncio
@@ -13,6 +18,8 @@ from dotenv import load_dotenv
 from pathlib import Path
 
 from app.services.llm_provider import get_chat_configs
+from app.services.llm_json import extract_json
+from app.services.sa_languages import SA_LANGUAGES
 from app.log_safe import slog
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
@@ -45,20 +52,27 @@ class IntentClassifier:
     def _backoff_for(self, config: dict) -> float:
         return 0.5 if config["name"] == "groq" else 1.5
 
-    async def is_contact_request(self, message: str) -> bool:
+    async def classify(self, message: str) -> dict:
         """
-        Returns True if the message is asking Alex for a contact introduction,
-        referral, or business connection. Returns False for everything else.
+        Returns {"is_request": bool, "language": str, "english_query": str}.
+
+        "language" is one of SA_LANGUAGES. "english_query" is an English
+        rendering of the message (unchanged if it's already English) —
+        callers use it to re-run the keyword filter when the original text
+        wouldn't match anything in the (English) contacts table.
         """
-        prompt = f"""You are analysing a WhatsApp message sent to Alex, a well-connected business professional.
+        languages_list = ", ".join(SA_LANGUAGES)
+        prompt = f"""You are analysing a WhatsApp message sent to Alex, a well-connected business professional in South Africa.
 
-Is this message asking Alex to introduce someone, recommend a contact, refer someone,
-or connect the sender with a person from Alex's professional network?
+Friends may write to him in English or in any of South Africa's other official languages, and often code-switch naturally between English and another language in the same message. South Africa's 11 official languages: {languages_list}.
 
-The message may contain typos, missing letters, or autocorrect mistakes (people type
-fast on WhatsApp) — read past the typos and judge the intended meaning, not the exact
-spelling. For example "i want sometging is Al consunltinnng" means
-"I want something in AI consulting" and IS a contact request.
+Do all three of the following in one pass:
+
+1. Identify which language the message is written in. Pick the single best match from the list above. If it's already in English, or is mostly English with just a greeting/aside in another language, say "English".
+2. Decide: is this message asking Alex to introduce someone, recommend a contact, refer someone, or connect the sender with a person from Alex's professional network?
+3. Give an English rendering of the message. If it's already in English, repeat it unchanged. Translate meaning, not word-for-word — keep any names, companies, and locations exactly as written.
+
+The message may contain typos, missing letters, or autocorrect mistakes (people type fast on WhatsApp) — read past the typos and judge the intended meaning, not the exact spelling. For example "i want sometging is Al consunltinnng" means "I want something in AI consulting" and IS a contact request.
 
 Examples that ARE contact requests:
 - "Do you know any good lawyers in London?"
@@ -82,7 +96,8 @@ Examples that are NOT contact requests:
 
 Message: "{message}"
 
-Reply with only YES or NO."""
+Reply with ONLY this exact JSON shape, nothing else — no markdown, no explanation:
+{{"language": "<one of the 11 languages above>", "is_request": true or false, "english_query": "<English rendering of the message>"}}"""
 
         last_error = None
         for config in self.configs:
@@ -90,7 +105,7 @@ Reply with only YES or NO."""
                 "model": config["model"],
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.1,
-                "max_tokens": 5,
+                "max_tokens": 300,
             }
             headers = {
                 "Authorization": f"Bearer {config['api_key']}",
@@ -104,14 +119,26 @@ Reply with only YES or NO."""
                             config["api_url"], headers=headers, json=payload, timeout=self._timeout_for(config)
                         )
                     if response.status_code == 200:
-                        answer = response.json()["choices"][0]["message"]["content"].strip().upper()
-                        slog(f"[Intent/{config['name']}] Classified as: {answer} (attempt {attempt})")
-                        return answer.startswith("YES")
-                    # Retry server-side/rate-limit errors; give up on other 4xx.
-                    last_error = f"HTTP {response.status_code}"
-                    slog(f"[Intent/{config['name']}] API error {response.status_code} (attempt {attempt}/{self.max_attempts})")
-                    if response.status_code < 500 and response.status_code != 429:
-                        break
+                        content = response.json()["choices"][0]["message"]["content"]
+                        try:
+                            data = extract_json(content)
+                            result = {
+                                "is_request": bool(data.get("is_request")),
+                                "language": data.get("language") or "English",
+                                "english_query": data.get("english_query") or message,
+                            }
+                            slog(f"[Intent/{config['name']}] {result['language']}, is_request={result['is_request']} (attempt {attempt})")
+                            return result
+                        except ValueError as e:
+                            # Malformed / non-JSON reply — retry (transient LLM behaviour).
+                            last_error = f"unparseable reply: {e}"
+                            slog(f"[Intent/{config['name']}] unparseable reply (attempt {attempt}/{self.max_attempts}): {e}")
+                    else:
+                        # Retry server-side/rate-limit errors; give up on other 4xx.
+                        last_error = f"HTTP {response.status_code}"
+                        slog(f"[Intent/{config['name']}] API error {response.status_code} (attempt {attempt}/{self.max_attempts})")
+                        if response.status_code < 500 and response.status_code != 429:
+                            break
                 except (httpx.TimeoutException, httpx.TransportError) as e:
                     last_error = f"{type(e).__name__}: {e!r}"
                     slog(f"[Intent/{config['name']}] transient error (attempt {attempt}/{self.max_attempts}): {last_error}")

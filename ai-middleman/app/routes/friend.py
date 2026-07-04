@@ -146,16 +146,27 @@ async def _run_matching_and_push_draft(
     db_pool, thread_id: int, whatsapp: "WhatsAppClient",
     request_text: str, display_text: str, uncertain: bool = False,
     candidates: list | None = None,
+    search_query: str | None = None,
+    language: str = "English",
 ):
     """Run the matching+draft pipeline for request_text and push a Send/Skip
     draft to Alex. display_text is what's shown as "{FRIEND_NAME} asked" (may
     differ from request_text when resolved from a confirmed clarification).
     candidates, if provided, skips Stage 1's DB query (already fetched
-    concurrently with intent classification by the caller)."""
+    concurrently with intent classification by the caller).
+
+    search_query is what Stage 1/2 actually search and reason against — the
+    English rendering of the message when the sender wrote in one of South
+    Africa's other official languages, since Stage 1 is a plain keyword match
+    against English contact data. request_text (Sam's own words) is always
+    what gets stored/shown and what the draft is generated in reply to, so
+    Alex sees the real conversation, not a translation. language drives which
+    language DraftGenerator replies in."""
     manager = ConversationManager(db_pool)
     engine = MatchingEngine(db_pool)
-    emit("matching", f"🔗 Searching contacts for: \"{request_text}\"")
-    result = await engine.match(request_text, candidates=candidates)
+    search_query = search_query or request_text
+    emit("matching", f"🔗 Searching contacts for: \"{search_query}\"")
+    result = await engine.match(search_query, candidates=candidates)
     all_matches = result.get("matches", [])
     viable = [m for m in all_matches if m.get("confidence", 0) >= 0.5]
     emit("matching", f"🔗 Found {len(viable)} good match(es)" if viable else "🔗 No confident match found")
@@ -176,6 +187,7 @@ async def _run_matching_and_push_draft(
             matches=viable,
             conversation_history=history,
             is_first_message=is_first_message,
+            language=language,
         )
 
     event_id = await manager.add_event(thread_id, "draft_suggested", {
@@ -267,26 +279,39 @@ async def _process_sam_message(db_pool, thread_id: int, text: str):
 
     async def _classify():
         try:
-            return await classifier.is_contact_request(text), False
+            return await classifier.classify(text), False
         except IntentClassificationError as e:
             slog(f"[Friend] Intent classification unavailable, failing open: {e}")
             emit("intent", "⚠️ AI classifier unreachable — assuming yes, just in case")
-            return True, True
+            return {"is_request": True, "language": "English", "english_query": text}, True
 
-    (is_request, classify_failed), candidates = await asyncio.gather(
+    (classification, classify_failed), candidates = await asyncio.gather(
         _classify(), engine.keyword_filter.filter_candidates(text)
     )
+    is_request = classification["is_request"]
+    language = classification["language"]
+    english_query = classification["english_query"]
 
     if not is_request:
         emit("resolved", "🙅 Not a contact request — nothing to do")
         return
 
-    emit("intent", "🧠 Yes — this is a contact request")
+    emit("intent", f"🧠 Yes — this is a contact request ({language})")
+
+    # Stage 1 (keyword_filter.filter_candidates above) ran concurrently on
+    # Sam's original text, before we knew the language — fine for English,
+    # but Stage 1 is a plain keyword match against English contact data, so a
+    # non-English message would have found nothing. Re-run it on the English
+    # rendering instead; this only costs one extra cheap SQL query (Stage 1
+    # has no LLM call), so English messages — the common case — pay nothing.
+    if language != "English" and english_query != text:
+        slog(f"[Friend] Non-English message ({language}) — re-running Stage 1 on English rendering")
+        candidates = await engine.keyword_filter.filter_candidates(english_query)
 
     await _run_matching_and_push_draft(
         db_pool, thread_id, whatsapp,
         request_text=text, display_text=text, uncertain=classify_failed,
-        candidates=candidates,
+        candidates=candidates, search_query=english_query, language=language,
     )
 
 

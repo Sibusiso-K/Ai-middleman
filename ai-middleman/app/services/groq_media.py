@@ -5,7 +5,10 @@ Both WhatsApp voice notes and images (from Alex's real phone or Sam's
 dashboard/web upload) get converted to plain text here, then fed into the
 exact same intent/matching/draft pipeline as a normal typed message — so a
 voice note asking "know a lawyer in Durban?" triggers a suggestion exactly
-like typing it would.
+like typing it would. That shared pipeline (IntentClassifier.classify) is
+what detects language and replies in kind, so voice/image messages in any of
+South Africa's 11 official languages get the same multilingual handling as a
+typed message, with no extra code needed here.
 
 Requires GROQ_API_KEY. Raises MediaTranscriptionError if it's missing or the
 API call fails — callers should surface that clearly rather than silently
@@ -38,7 +41,16 @@ def _require_key() -> str:
 
 
 async def transcribe_audio(audio_bytes: bytes, filename: str = "voice.ogg") -> str:
-    """Transcribe a voice note to text using Groq's hosted Whisper."""
+    """Transcribe a voice note to text using Groq's hosted Whisper.
+
+    No `language` parameter is passed, so Whisper auto-detects it and
+    transcribes in that language (not English) — a voice note in isiZulu
+    comes back as isiZulu text, which then flows into IntentClassifier.
+    Whisper's accuracy varies a lot across South Africa's 11 official
+    languages: strong for English/Afrikaans, workable for isiZulu/isiXhosa/
+    Sesotho, and meaningfully weaker for isiNdebele, Xitsonga, Tshivenda,
+    siSwati, and Sepedi/Setswana — a training-data limitation of every open
+    transcription model, not something fixable in this code."""
     api_key = _require_key()
     model = os.getenv("GROQ_WHISPER_MODEL", "whisper-large-v3-turbo")
 
@@ -58,10 +70,16 @@ async def transcribe_audio(audio_bytes: bytes, filename: str = "voice.ogg") -> s
 async def describe_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
     """
     Describe an image (and read any text in it) using a Groq vision model.
-    Returns a short plain-English description suitable for feeding into the
-    same text pipeline as a typed message — e.g. a business-card photo becomes
+    Returns a short description suitable for feeding into the same text
+    pipeline as a typed message — e.g. a business-card photo becomes
     something like "A business card for Jane Doe, Partner at XYZ Legal,
     jane@xyz.com, +27 82 555 1234."
+
+    Does not force the description into English: if the image contains text
+    in one of South Africa's other official languages (a business card note
+    in isiZulu, for instance), it's transcribed verbatim in its own
+    language, not translated — IntentClassifier.classify detects the
+    language downstream the same way it would for a typed message.
     """
     api_key = _require_key()
     model = os.getenv("GROQ_VISION_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
@@ -70,10 +88,11 @@ async def describe_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> s
     data_url = f"data:{mime_type};base64,{b64}"
 
     prompt = (
-        "Describe this image in 1-3 sentences, in plain English. If it contains "
-        "any text (e.g. a business card, screenshot, or job posting), transcribe "
-        "that text exactly. Be factual and concise — this will be treated as if "
-        "the sender had typed it as a WhatsApp message."
+        "Describe this image in 1-3 sentences. If it contains any text (e.g. a "
+        "business card, screenshot, or job posting), transcribe that text "
+        "exactly as written, in whatever language it's actually in — do NOT "
+        "translate it into English. Be factual and concise — this will be "
+        "treated as if the sender had typed it as a WhatsApp message."
     )
 
     async with httpx.AsyncClient() as client:

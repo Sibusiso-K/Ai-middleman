@@ -43,7 +43,7 @@ async def run_intent_eval(cases: list) -> dict:
     for case in cases:
         text, expected = case["text"], case["expected"]
         try:
-            actual = await classifier.is_contact_request(text)
+            actual = (await classifier.classify(text))["is_request"]
         except IntentClassificationError as e:
             errors += 1
             rows.append((text, expected, None, f"ERROR: {e}"))

@@ -57,6 +57,7 @@ class DraftGenerator:
         matches: List[Dict[str, Any]],
         conversation_history: str = "",
         is_first_message: bool = True,
+        language: str = "English",
     ) -> str:
         """
         Generate a natural WhatsApp reply in Alex's voice.
@@ -65,8 +66,18 @@ class DraftGenerator:
         conversation_history (oldest to newest, one line per turn) and
         is_first_message let the model continue an ongoing thread naturally
         instead of opening every single reply with a fresh greeting.
+
+        language is whichever of South Africa's official languages Sam wrote
+        in (from IntentClassifier.classify) — the reply is written in that
+        same language, not translated to English, so the conversation reads
+        naturally on Sam's side.
         """
         if not matches:
+            # Static fallback, deliberately English-only: translating it into
+            # 10 more languages without a native speaker to verify each one
+            # would risk shipping wrong or awkward phrasing. The one path
+            # that does need to work in Sam's language — a real match — is
+            # generated fresh by the model above, in the requested language.
             return "Nothing great in my network for this one — let me ask around and get back to you 🤔"
 
         # Build contact context for the prompt
@@ -92,6 +103,15 @@ class DraftGenerator:
             "the way a real person continues a text thread, picking up naturally "
             "from what Sam just said."
         )
+        language_rule = (
+            "Sam wrote in English, so reply in English."
+            if language == "English" else
+            f"Sam wrote in {language}. Write Alex's reply in {language} too — "
+            f"do NOT reply in English or translate it back. South Africans "
+            f"naturally code-switch, so it's fine to keep contact names, "
+            f"company names, and job titles in their original English form "
+            f"even inside a {language} sentence."
+        )
 
         prompt = f"""You are drafting a WhatsApp reply for Alex, a well-connected business professional.
 
@@ -113,6 +133,8 @@ Best matching contacts from Alex's network:
 {contact_summary}
 
 {opener_rule}
+
+{language_rule}
 
 Write Alex's WhatsApp reply now. 2-4 sentences maximum.
 Do NOT use bullet points or lists.
