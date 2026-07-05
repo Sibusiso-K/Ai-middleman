@@ -31,25 +31,25 @@
 | False | False | PASS | Running behind, be there in 10 |
 
 ## Matching relevance
-- Relevance rate: 10/12 (83.3%)
+- Relevance rate: 11/12 (91.7%)
 
 | Query | Top match | Result | Notes |
 |---|---|---|---|
-| I need a leveraged finance MD in London for a mid-market buyout | Ryan Russell (Apollo Global, London, UK) conf=0.95 | PASS |  |
+| I need a leveraged finance MD in London for a mid-market buyout | Regina Thompson (Goldman Sachs, London, UK) conf=0.95 | PASS |  |
 | Find me a direct lending specialist in Dubai | Tonya Sharp (Goldman Sachs, Dubai, UAE) conf=0.95 | PASS |  |
-| Connect me with an M&A lawyer at a top firm in London | None | None | ERROR:  |
+| Connect me with an M&A lawyer at a top firm in London | John Hall (Ares Management, London, UK) conf=0.85 | PASS |  |
 | Find a healthcare venture capital principal in Boston | Kara Davis (Sofinnova Partners, Boston, USA) conf=0.95 | PASS |  |
-| Need an energy infrastructure investor in Amsterdam | John Mcgee (Copenhagen Infrastructure Partners, Amsterdam, Netherlands) conf=0.95 | PASS |  |
-| Looking for an investment banking VP in Singapore | Joseph Cabrera (Heidrick & Struggles, Singapore) conf=0.85 | PASS |  |
-| Connect me with a private credit principal in Mumbai | Sheila Thompson (Orsted, Mumbai, India) conf=0.85 | PASS |  |
-| Find a corporate lawyer at Kirkland & Ellis | Travis Dixon (Kirkland & Ellis, Chicago, USA) conf=0.95 | PASS |  |
-| Real estate investment chairman in Dubai | James Bailey (Crown Estate Partners, Dubai, UAE) conf=0.95 | PASS |  |
-| Tech CTO in Zurich | Jason Trujillo (Forge Analytics, Zurich, Switzerland) conf=0.95 | PASS |  |
+| Need an energy infrastructure investor in Amsterdam | Connie Orozco (Generate Capital, Amsterdam, Netherlands) conf=0.95 | PASS |  |
+| Looking for an investment banking VP in Singapore | Scott Ayers (Egon Zehnder, Singapore) conf=0.85 | PASS |  |
+| Connect me with a private credit principal in Mumbai | Andrea Hubbard (EnCap Investments, Mumbai, India) conf=0.95 | PASS |  |
+| Find a corporate lawyer at Kirkland & Ellis | Lauren Boyd (Kirkland & Ellis, Frankfurt, Germany) conf=0.95 | PASS |  |
+| Real estate investment chairman in Dubai | Laurie Watts (Meridian RE Partners, Dubai, UAE) conf=0.85 | PASS |  |
+| Tech CTO in Zurich | Melanie Garrett (Stealth (ex-Revolut), Zurich, Switzerland) conf=0.95 | PASS |  |
 | Recruiting partner in Tel Aviv | John Brown (Forge Analytics, Tel Aviv, Israel) conf=0.95 | PASS |  |
-| Someone in Johannesburg who does corporate law | Suzanne Garcia (BCG, Paris, France) conf=0.5 | FAIL | expected a low-confidence/no match (this location isn't in the dataset) but got a confident hit — possible hallucination |
+| Someone in Johannesburg who does corporate law | Troy Ortega (BCG, Dubai, UAE) conf=0.6 | FAIL | expected a low-confidence/no match (this location isn't in the dataset) but got a confident hit — possible hallucination |
 
 ## Follow-up selection
-- Selection accuracy: 12/12 (100.0%)
+- Selection accuracy: 16/16 (100.0%)
 
 | Follow-up | Expected | Got | Result |
 |---|---|---|---|
@@ -58,7 +58,11 @@
 | Sally should be perfect, shot me their details | ['Sally Meyer'] | ['Sally Meyer'] | PASS |
 | the second one works | ['Sally Meyer'] | ['Sally Meyer'] | PASS |
 | both of them please | ['David Cohen', 'John Hall', 'Sally Meyer'] | ['David Cohen', 'John Hall', 'Sally Meyer'] | PASS |
+| both of them | ['David Cohen', 'John Hall', 'Sally Meyer'] | ['David Cohen', 'John Hall', 'Sally Meyer'] | PASS |
 | connect me with all three | ['David Cohen', 'John Hall', 'Sally Meyer'] | ['David Cohen', 'John Hall', 'Sally Meyer'] | PASS |
+| connect me with them | ['David Cohen', 'John Hall', 'Sally Meyer'] | ['David Cohen', 'John Hall', 'Sally Meyer'] | PASS |
+| sure connect me with dem | ['David Cohen', 'John Hall', 'Sally Meyer'] | ['David Cohen', 'John Hall', 'Sally Meyer'] | PASS |
+| what about them? | (none) | (none) | PASS |
 | send me David and John's details | ['David Cohen', 'John Hall'] | ['David Cohen', 'John Hall'] | PASS |
 | great, go with the first one | ['John Hall'] | ['John Hall'] | PASS |
 | John is too junior, anyone else? | (none) | (none) | PASS |
