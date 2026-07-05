@@ -78,7 +78,7 @@ class LLMAgent:
                     if response.status_code == 200:
                         content = response.json()["choices"][0]["message"]["content"]
                         try:
-                            return extract_json(content)
+                            return self._reconcile_matches(extract_json(content), candidates)
                         except json.JSONDecodeError as e:
                             # Malformed / non-JSON reply — retry (transient LLM behaviour).
                             slog(f"[Agent/{config['name']}] unparseable reply (attempt {attempt}/{self.max_retries}): {e}")
@@ -97,6 +97,42 @@ class LLMAgent:
             slog(f"[Agent] {config['name']} exhausted after {self.max_retries} attempts — trying next provider" if config is not self.configs[-1] else f"[Agent] {config['name']} exhausted — no more providers to try")
 
         return self._fallback_response()
+
+    @staticmethod
+    def _reconcile_matches(parsed: Dict[str, Any], candidates: List[Dict]) -> Dict[str, Any]:
+        """Overwrite each match's display fields (name/title/company/location)
+        with the authoritative candidate our own keyword filter supplied,
+        looked up by contact_id, and drop any match whose id isn't a real
+        candidate.
+
+        The 8B ranking model reliably picks a real candidate *id* but
+        sometimes writes a wrong or hallucinated *name* next to it. Trusting
+        our own data guarantees the name shown to the user, and the
+        phone/email delivered later (also keyed by that id), point at the same
+        real person — otherwise Sam could be told about one contact and handed
+        a different one's details."""
+        by_id = {c["id"]: c for c in candidates}
+        cleaned = []
+        for m in parsed.get("matches", []) or []:
+            cid = m.get("contact_id")
+            try:
+                cid = int(cid)
+            except (TypeError, ValueError):
+                pass
+            c = by_id.get(cid)
+            if not c:
+                slog(f"[Agent] dropping match with unknown contact_id={m.get('contact_id')!r} (name claimed: {m.get('name')!r})")
+                continue
+            m["contact_id"] = cid
+            m["name"] = c.get("full_name", m.get("name"))
+            m["title"] = c.get("title", m.get("title"))
+            m["company"] = c.get("company", m.get("company"))
+            m["location"] = c.get("location", m.get("location"))
+            cleaned.append(m)
+        parsed["matches"] = cleaned
+        if not cleaned and parsed.get("match_quality") != "none":
+            parsed["match_quality"] = "none"
+        return parsed
 
     def _build_prompt(self, query: str, candidates: List[Dict]) -> str:
         candidate_list = "\n".join(
