@@ -379,6 +379,63 @@ Question & Your answer \\
 \bottomrule
 \end{longtable}
 
+\section{Test \& demo message script}
+\label{sec:testscript}
+
+Type these into the ``Sam'' box (Inbox) in order. They exercise every draft behaviour, and each one is chosen to land well against the (finance-heavy) seed data. \textbf{Pick 2--3 flows for the live demo}; keep the rest as a testing checklist. Don't run the whole list minutes before presenting --- it burns Groq quota.
+
+\subsection{Flow 1 --- multi-option draft, then pick one (your main demo)}
+\begin{enumerate}
+    \item \emph{Sam:} ``I need a leveraged finance MD in London for a mid-market buyout''
+    \item[] $\rightarrow$ draft suggests 1--3 people by name, asks who you want.
+    \item \emph{Sam:} ``connect me with the first one, send their details''
+    \item[] $\rightarrow$ a Send/Skip draft with that person's phone/email appears on Alex's WhatsApp.
+\end{enumerate}
+
+\subsection{Flow 2 --- multi-option, then take everyone}
+\begin{enumerate}
+    \item \emph{Sam:} ``Any private equity partners in New York I should meet?''
+    \item \emph{Sam:} ``connect me with them'' \quad(also try: ``both of them'', ``sure connect me with dem'')
+    \item[] $\rightarrow$ details for \emph{all} suggested people in one draft.
+\end{enumerate}
+
+\subsection{Flow 3 --- single strong match}
+\begin{itemize}
+    \item ``Find me a direct lending specialist in Dubai''
+    \item ``Connect me with an M\&A lawyer at a top firm in London''
+    \item ``Find a healthcare venture capital principal in Boston''
+    \item ``Need an energy infrastructure investor in Amsterdam''
+\end{itemize}
+Then a follow-up by name, e.g.\ ``Sarah sounds perfect, send me her details''.
+
+\subsection{Flow 4 --- the honest-failure moment (show this on purpose)}
+\begin{itemize}
+    \item ``Someone in Johannesburg who does corporate law''
+\end{itemize}
+Johannesburg isn't in the dataset, so the match comes back low-confidence / no confident hit --- proof it fails honestly instead of inventing someone. \textbf{This is your best answer to ``how do you know it isn't hallucinating?''}
+
+\subsection{Flow 5 --- multilingual (South Africa's 11 languages)}
+\begin{itemize}
+    \item Afrikaans: ``Ken jy iemand wat 'n korporatiewe prokureur is in Londen?''
+    \item isiZulu: ``Ngidinga ummeli waseLondon wamashishini''
+\end{itemize}
+The reply comes back in the same language. \textbf{Be honest:} Afrikaans is fluent; isiZulu is understandable but grammatically rough --- an 8B-model limitation, not a bug.
+
+\subsection{Flow 6 --- the guard (should NOT produce a draft)}
+\begin{itemize}
+    \item ``How was your weekend?'' \quad / \quad ``Thanks man, appreciate it''
+    \item[] $\rightarrow$ correctly recognised as \emph{not} a contact request --- nothing sent to Alex.
+    \item After a suggestion, try ``John's a bit junior, anyone else?'' $\rightarrow$ read as a rejection, so it does \emph{not} connect John; it searches afresh.
+\end{itemize}
+
+\subsection{Flow 7 --- voice note \& image (if demoing media)}
+\begin{itemize}
+    \item Tap the mic, say a request out loud (e.g.\ ``know any fintech founders in Singapore?'') --- it's transcribed and runs the same pipeline.
+    \item Attach a photo of a business card or a job posting --- the text is read out of the image and fed in as if typed.
+\end{itemize}
+
+\textbf{Safe city/sector combos} (strong matches in the seed data): London, New York, Dubai, Singapore, Hong Kong, Boston, Amsterdam, Zurich, Tel Aviv, Mumbai $\times$ finance / legal / healthcare / energy / real estate / tech. Avoid cities \emph{not} in the set (Johannesburg, Cape Town, Nairobi, Lagos) unless you're deliberately demoing Flow 4.
+
 \section{Final reminders}
 \begin{itemize}
     \item Rehearse with pre-vetted, high-confidence demo queries (finance/legal/healthcare combos in London, Dubai, Boston, Zurich) rather than improvising live.
