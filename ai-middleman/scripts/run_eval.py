@@ -1,14 +1,17 @@
 """
 run_eval.py — Labeled evaluation harness for the AI Middleman pipeline.
 
-Runs two independent checks against tests/eval_set.json:
+Runs three independent checks against tests/eval_set.json:
   1. Intent classification accuracy/precision/recall (direct, no side effects —
      calls IntentClassifier in-process, never touches WhatsApp).
   2. Matching relevance (calls the local API's POST /match, which also has no
      side effects — no WhatsApp send, no thread_events written).
+  3. Follow-up selection (pure function, no LLM/API/quota) — checks that
+     _resolve_selected_contacts picks the right people from the last draft's
+     suggestions given a natural follow-up.
 
 Requires the local API to be running on localhost:8000 (for the matching
-half only — intent classification doesn't need it).
+half only — intent classification and follow-up selection don't need it).
 
 Usage:
     python scripts/run_eval.py
@@ -26,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
 from app.services.intent_classifier import IntentClassifier, IntentClassificationError
+from app.routes.friend import _resolve_selected_contacts
 
 EVAL_SET_PATH = Path(__file__).parent.parent / "tests" / "eval_set.json"
 REPORT_PATH = Path(__file__).parent.parent / "tests" / "eval_report.md"
@@ -142,7 +146,37 @@ async def run_matching_eval(cases: list) -> dict:
     return {"rows": rows, "passed": passed, "total": total}
 
 
-def write_report(intent_result: dict, matching_result: dict):
+def run_followup_eval(section: dict) -> dict:
+    print()
+    print("=" * 70)
+    print("FOLLOW-UP SELECTION (no LLM/API — pure resolver)")
+    print("=" * 70)
+
+    # Rebuild the "last suggested matches" the resolver would see.
+    suggested = [{"contact_id": i + 1, "name": n} for i, n in enumerate(section["suggested"])]
+    print(f"  Suggested: {', '.join(section['suggested'])}")
+    print()
+
+    passed = 0
+    rows = []
+    for case in section["cases"]:
+        text, expected = case["text"], sorted(case["expected"])
+        got = sorted(m.get("name", "") for m in _resolve_selected_contacts(text, suggested))
+        ok = got == expected
+        passed += ok
+        mark = "PASS" if ok else "FAIL"
+        rows.append((text, expected, got, mark))
+        print(f"  [{mark}] {text!r}")
+        if not ok:
+            print(f"         expected {expected}, got {got}")
+
+    total = len(section["cases"])
+    print()
+    print(f"  Selection accuracy: {passed}/{total} ({passed/total:.1%})")
+    return {"rows": rows, "passed": passed, "total": total}
+
+
+def write_report(intent_result: dict, matching_result: dict, followup_result: dict):
     lines = ["# AI Middleman — Evaluation Report", ""]
     lines.append("## Intent classification")
     lines.append(f"- Accuracy: {intent_result['accuracy']:.1%}")
@@ -163,6 +197,14 @@ def write_report(intent_result: dict, matching_result: dict):
     lines.append("|---|---|---|---|")
     for query, top_desc, mark, reasons in matching_result["rows"]:
         lines.append(f"| {query} | {top_desc} | {mark} | {reasons} |")
+    lines.append("")
+    lines.append("## Follow-up selection")
+    lines.append(f"- Selection accuracy: {followup_result['passed']}/{followup_result['total']} ({followup_result['passed']/followup_result['total']:.1%})")
+    lines.append("")
+    lines.append("| Follow-up | Expected | Got | Result |")
+    lines.append("|---|---|---|---|")
+    for text, expected, got, mark in followup_result["rows"]:
+        lines.append(f"| {text} | {expected or '(none)'} | {got or '(none)'} | {mark} |")
     REPORT_PATH.write_text("\n".join(lines), encoding="utf-8")
 
 
@@ -171,8 +213,9 @@ async def main():
 
     intent_result = await run_intent_eval(eval_set["intent"])
     matching_result = await run_matching_eval(eval_set["matching"])
+    followup_result = run_followup_eval(eval_set["followup"])
 
-    write_report(intent_result, matching_result)
+    write_report(intent_result, matching_result, followup_result)
     print()
     print(f"Full report written to {REPORT_PATH}")
 

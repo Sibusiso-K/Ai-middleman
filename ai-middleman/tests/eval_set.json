@@ -37,5 +37,24 @@
     {"query": "Tech CTO in Zurich", "expected_sector": "Tech", "expected_location_contains": "Zurich", "_note": "unseen combo - generalization check"},
     {"query": "Recruiting partner in Tel Aviv", "expected_sector": "Recruiting/Other", "expected_location_contains": "Tel Aviv", "_note": "unseen combo - generalization check"},
     {"query": "Someone in Johannesburg who does corporate law", "expected_location_contains": null, "_note": "Johannesburg isn't in the seed dataset - correct behavior is an honest low-confidence/no-match, NOT a hallucinated JHB contact"}
-  ]
+  ],
+
+  "followup": {
+    "_note": "Deterministic (no LLM/API) check of _resolve_selected_contacts: after a draft suggests these three people, which does Sam's follow-up pick? Guards against both misses ('connect me with John' must pick John) and false positives ('John's too junior' must NOT pick John).",
+    "suggested": ["John Hall", "Sally Meyer", "David Cohen"],
+    "cases": [
+      {"text": "okay connect me with John", "expected": ["John Hall"]},
+      {"text": "connect me with John and Sally", "expected": ["John Hall", "Sally Meyer"]},
+      {"text": "Sally should be perfect, shot me their details", "expected": ["Sally Meyer"]},
+      {"text": "the second one works", "expected": ["Sally Meyer"]},
+      {"text": "both of them please", "expected": ["John Hall", "Sally Meyer", "David Cohen"]},
+      {"text": "connect me with all three", "expected": ["John Hall", "Sally Meyer", "David Cohen"]},
+      {"text": "send me David and John's details", "expected": ["John Hall", "David Cohen"]},
+      {"text": "great, go with the first one", "expected": ["John Hall"]},
+      {"text": "John is too junior, anyone else?", "expected": []},
+      {"text": "what does David do again?", "expected": []},
+      {"text": "actually I need a lawyer in Dubai instead", "expected": []},
+      {"text": "yeah", "expected": []}
+    ]
+  }
 }
