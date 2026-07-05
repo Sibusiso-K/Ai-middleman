@@ -157,7 +157,7 @@ function InboxPage() {
               <SectionHeader title="Live Pipeline" subtitle="What the server is doing right now" />
             </div>
             <div className="flex-1 overflow-y-auto">
-              <PipelineFlowCompact active={pipeline.active} />
+              <PipelineFlowCompact active={pipeline.active} reached={pipeline.reached} />
               <div className="px-3 pb-3">
                 <PipelineFeed events={pipeline.events} compact />
               </div>
