@@ -112,13 +112,25 @@ class DraftGenerator:
             f"company names, and job titles in their original English form "
             f"even inside a {language} sentence."
         )
+        n_options = min(len(matches), 3)
+        options_rule = (
+            "There's one strong match. Suggest that person by name and offer to "
+            "introduce them."
+            if n_options == 1 else
+            f"There are {n_options} good options. Mention all {n_options} by name "
+            f"with a few words each on why they fit, then ask Sam who they'd like "
+            f"to be connected with (or if they want more than one). Keep it "
+            f"natural and conversational — this is a text, not a list. Do NOT "
+            f"share any phone numbers or emails yet; that only happens once Sam "
+            f"picks and Alex approves."
+        )
 
         prompt = f"""You are drafting a WhatsApp reply for Alex, a well-connected business professional.
 
 Alex's communication style:
 - Warm, direct, and personal — like texting a close friend or colleague
-- Short and punchy — maximum 3-4 sentences total
-- Mentions the contact's name, role, and why they are perfect for this situation
+- Short and punchy — a few sentences, even when suggesting 2-3 people
+- Names the contact(s) and why they fit this situation
 - Offers to make the introduction personally
 - Never uses bullet points, numbered lists, or formal language
 - Uses occasional emoji naturally (🤝 👌 💪) but not more than one or two
@@ -128,6 +140,8 @@ Alex's communication style:
 {history_block}
 Sam's latest message:
 "{original_request}"
+
+How many people to suggest: {options_rule}
 
 Best matching contacts from Alex's network:
 {contact_summary}

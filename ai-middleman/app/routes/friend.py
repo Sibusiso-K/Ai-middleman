@@ -69,6 +69,75 @@ def _looks_like_affirmation(text: str) -> bool:
     return bool(_AFFIRMATION_RE.match(text))
 
 
+# --- Follow-up selection: "connect me with John", "Sally works, send details",
+# "the second one", "both of them" -----------------------------------------
+# Sam picks from the 1-3 people the last draft suggested. We resolve WHO by
+# name or position, gated by a positive cue (so "John's too junior, anyone
+# else?" is NOT read as "connect me with John").
+_ORDINALS = {"first": 0, "1st": 0, "second": 1, "2nd": 1, "third": 2, "3rd": 2}
+
+_POSITIVE_CUE_RE = re.compile(
+    r"\b(connect|intro|introduce|link me|hook me|details?|contact|number|phone|"
+    r"email|send|share|forward|perfect|great|works?|ideal|sounds good|go with|"
+    r"let'?s go|yes|yeah|yep|sure|please)\b",
+    re.IGNORECASE,
+)
+# Signals a rejection or a request for different people, not a pick.
+_NEGATIVE_CUE_RE = re.compile(
+    r"\b(anyone else|someone else|somebody else|instead|too junior|too senior|"
+    r"rather not|don'?t|do not|not (him|her|them|really|keen|sure)|no thanks)\b",
+    re.IGNORECASE,
+)
+
+
+def _join_names(names: list) -> str:
+    """['John'] -> 'John'; ['John','Sally'] -> 'John and Sally';
+    ['A','B','C'] -> 'A, B and C'."""
+    if not names:
+        return "them"
+    if len(names) == 1:
+        return names[0]
+    return f"{', '.join(names[:-1])} and {names[-1]}"
+
+
+def _resolve_selected_contacts(text: str, matches: list) -> list:
+    """Given Sam's follow-up and the 1-3 previously-suggested matches, return
+    the subset Sam is picking — by name ("connect me with John and Sally"), by
+    position ("the second one"), or all ("both of them"). Returns [] if the
+    message doesn't clearly point at a suggested contact, or reads as a
+    rejection rather than a pick."""
+    if not matches:
+        return []
+    if _NEGATIVE_CUE_RE.search(text) or not _POSITIVE_CUE_RE.search(text):
+        return []
+
+    low = f" {text.lower()} "
+    if re.search(r"\b(both|all of (them|those)|all three|everyone|them all)\b", low):
+        return list(matches)
+
+    selected, seen = [], set()
+
+    def _add(idx: int):
+        if 0 <= idx < len(matches) and idx not in seen:
+            selected.append(matches[idx])
+            seen.add(idx)
+
+    for word, idx in _ORDINALS.items():
+        if re.search(rf"\b{re.escape(word)}\b", low):
+            _add(idx)
+
+    for i, m in enumerate(matches):
+        name = (m.get("name") or "").strip()
+        if not name:
+            continue
+        first = name.split()[0].lower()
+        # Allow an optional possessive ("John's" / "Johns details").
+        if len(first) >= 3 and re.search(rf"\b{re.escape(first)}(?:['’]?s)?\b", low):
+            _add(i)
+
+    return selected
+
+
 def _format_history_for_draft(events: list) -> tuple[str, bool]:
     """Turn recent thread_events into a compact "Sam: ... / Alex: ..." transcript
     for the draft prompt, skipping pending/system events. Returns (history_text,
@@ -91,54 +160,82 @@ def _format_history_for_draft(events: list) -> tuple[str, bool]:
     return "\n".join(lines[-8:]), is_first_message
 
 
-async def _handle_details_request(db_pool, thread_id: int, text: str, whatsapp: "WhatsAppClient") -> bool:
+async def _handle_followup_selection(db_pool, thread_id: int, text: str, whatsapp: "WhatsAppClient") -> bool:
     """
-    If this looks like a follow-up asking for the last-matched contact's
-    details, look them up and push a Send/Skip-gated draft containing the
-    actual phone/email to Alex. Returns True if handled (caller should not
-    also run the full matching pipeline).
+    Handle a follow-up where Sam picks from the people the last draft
+    suggested — "connect me with John", "Sally works, send her details",
+    "the second one", "both of them" — by looking up the chosen contact(s)
+    and pushing Alex a Send/Skip-gated draft with the actual phone/email.
+    Revealing PII still requires Alex's approval; this just skips a fresh
+    matching pass. Returns True if handled (caller should not also run the
+    full matching pipeline).
     """
-    if not _looks_like_details_request(text):
-        return False
-
-    emit("checking", "🔍 Looks like Sam is asking for a contact's details")
-
     manager = ConversationManager(db_pool)
-    match = await manager.get_last_sent_match(thread_id)
-    if not match or not match.get("contact_id"):
-        return False  # nothing to resolve — fall through to normal pipeline
+    matches = await manager.get_last_matches(thread_id)
+    if not matches:
+        return False  # no recent suggestions — this can't be a pick
 
+    selected = _resolve_selected_contacts(text, matches)
+
+    # Generic "send me their details" with no name/position: if only one
+    # person was suggested (or one was actually sent), that's who they mean.
+    if not selected and _looks_like_details_request(text):
+        last = await manager.get_last_sent_match(thread_id)
+        if last:
+            selected = [last]
+
+    if not selected:
+        return False  # not a pick — fall through to the normal pipeline
+
+    emit("checking", "🔍 Sam is picking from the people we suggested")
+
+    # Look up real contact details for each selected person.
+    picked = []
     async with db_pool.acquire() as conn:
-        contact = await conn.fetchrow(
-            "SELECT full_name, phone, email FROM contacts WHERE id = $1",
-            match["contact_id"],
-        )
-    if not contact or not (contact["phone"] or contact["email"]):
-        return False
+        for m in selected:
+            cid = m.get("contact_id")
+            if not cid:
+                continue
+            c = await conn.fetchrow(
+                "SELECT full_name, phone, email FROM contacts WHERE id = $1", cid
+            )
+            if not c or not (c["phone"] or c["email"]):
+                continue
+            details = " / ".join(filter(None, [
+                f"📞 {c['phone']}" if c["phone"] else None,
+                f"📧 {c['email']}" if c["email"] else None,
+            ]))
+            first = c["full_name"].split()[0] if c["full_name"] else "them"
+            picked.append({"match": m, "full_name": c["full_name"], "first": first, "details": details})
 
-    details_lines = " / ".join(filter(None, [
-        f"📞 {contact['phone']}" if contact["phone"] else None,
-        f"📧 {contact['email']}" if contact["email"] else None,
-    ]))
-    first_name = contact["full_name"].split()[0] if contact["full_name"] else "them"
-    draft = f"Here's {first_name} for you — {details_lines}. Tell {first_name} I sent you 🤝"
+    if not picked:
+        return False  # couldn't resolve any real details — let the pipeline try
+
+    if len(picked) == 1:
+        p = picked[0]
+        draft = f"Here's {p['first']} for you — {p['details']}. Tell {p['first']} I sent you 🤝"
+    else:
+        body = "\n".join(f"{p['first']} — {p['details']}" for p in picked)
+        names = _join_names([p["first"] for p in picked])
+        draft = f"Here you go 🤝\n{body}\nTell {names} I sent you!"
 
     event_id = await manager.add_event(thread_id, "draft_suggested", {
         "original_message": text,
         "draft_reply": draft,
-        "matches": [match],
+        "matches": [p["match"] for p in picked],
     })
     buttons = [
         {"type": "reply", "reply": {"id": f"send_{event_id}", "title": "✅ Send"}},
         {"type": "reply", "reply": {"id": f"skip_{event_id}", "title": "❌ Skip"}},
     ]
+    who = _join_names([p["full_name"] for p in picked])
     draft_body = (
-        f"🤖 *{FRIEND_NAME} is asking for {contact['full_name']}'s contact details*\n\n"
+        f"🤖 *{FRIEND_NAME} is asking for {who}'s contact details*\n\n"
         f"*Draft:*\n{draft}\n\n"
         f"Tap Send to share it, or Skip to hold off."
     )
     await whatsapp.send_interactive_buttons(to=ALEX_NUMBER, body_text=draft_body, buttons=buttons)
-    emit("awaiting_approval", f"📤 Draft with {contact['full_name']}'s details sent to Alex — waiting for Send/Skip")
+    emit("awaiting_approval", f"📤 Draft with {who}'s details sent to Alex — waiting for Send/Skip")
     return True
 
 
@@ -245,10 +342,11 @@ async def _process_sam_message(db_pool, thread_id: int, text: str):
     emit("relaying", "📡 Relaying Sam's message to Alex's WhatsApp")
     await whatsapp.send_message(to=ALEX_NUMBER, text=text)
 
-    # A "send their details" follow-up is handled directly against the last
-    # match — no need to reclassify/rematch, and it still requires Alex's
-    # approval before any phone/email goes out.
-    if await _handle_details_request(db_pool, thread_id, text, whatsapp):
+    # A follow-up picking from the people we just suggested ("connect me with
+    # John and Sally", "the second one works, send details") is resolved
+    # directly against the last draft's matches — no reclassify/rematch — and
+    # still requires Alex's approval before any phone/email goes out.
+    if await _handle_followup_selection(db_pool, thread_id, text, whatsapp):
         return
 
     # A short confirmation ("yeah") immediately after Alex asked a clarifying
