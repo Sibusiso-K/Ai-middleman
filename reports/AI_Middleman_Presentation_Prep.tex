@@ -436,6 +436,98 @@ The reply comes back in the same language. \textbf{Be honest:} Afrikaans is flue
 
 \textbf{Safe city/sector combos} (strong matches in the seed data): London, New York, Dubai, Singapore, Hong Kong, Boston, Amsterdam, Zurich, Tel Aviv, Mumbai $\times$ finance / legal / healthcare / energy / real estate / tech. Avoid cities \emph{not} in the set (Johannesburg, Cape Town, Nairobi, Lagos) unless you're deliberately demoing Flow 4.
 
+\section{Delivering the talk --- the 10/10 plan}
+\label{sec:talk}
+
+\textbf{30-minute session: aim for $\sim$18 min talk + $\sim$12 min Q\&A.} A great talk (TED / Apple) makes the audience \emph{feel the problem} before the solution, and lands one memorable idea. Yours is:
+
+\begin{center}
+\emph{``AI that does the work, but never takes the decision. Alex stays in control.''}
+\end{center}
+
+Everything serves that idea. For this audience (Isazi engineers judging a data-science hire), your edge is \textbf{honesty}: most candidates oversell; you will stand up and name exactly what's production-ready, what isn't, and what you'd fix. That self-awareness reads as seniority.
+
+\subsection{The 8-beat structure}
+\begin{longtable}{@{}p{0.3cm}p{2.6cm}p{1.2cm}p{10.5cm}@{}}
+\toprule
+\# & Beat & Time & What you do \\
+\midrule
+\endhead
+1 & The Hook & 90s & A human moment, no tech. Alex + the friend's text. Let it breathe. \\
+2 & The Problem & 2m & Networks are the most valuable, least searchable asset anyone owns; intros are high-friction; universal. \\
+3 & The Big Idea & 2m & The one-liner, then the thesis: it drafts in Alex's voice --- and always asks before sending. \\
+4 & Live Demo & 6m & The centrepiece. End-to-end. The pipeline stepper lighting up is the visual money-shot. \\
+5 & Under the Hood & 3m & Two-stage retrieve-then-rank, model choice, the tradeoffs. Prove you understand it deeply. \\
+6 & Proof & 2m & Eval numbers (honest) + the Johannesburg ``fails honestly'' moment. \\
+7 & Honest Reflection & 1.5m & The two-lens 6.5/10. What's ready, what isn't, what's next. \textbf{This beat wins the job.} \\
+8 & Vision + Close & 1m & Multilingual for SA's 11 languages; callback to Alex; thank you. \\
+\bottomrule
+\end{longtable}
+
+\subsection{Speaker beat sheet (notes, not a script)}
+Only two things are memorised word-for-word: the \textbf{opening} and the \textbf{closing}. Everything else you \emph{know}, you don't recite.
+
+\textbf{Beat 1 --- Hook (memorise this):}
+\begin{quote}\itshape
+``Alex has fifty thousand contacts. This morning a friend texts him: `Hey, know a good lawyer in London?' \ldots{} And Alex knows the answer is somewhere in his phone. But finding the right person, remembering who he can actually vouch for, and writing a warm introduction --- that takes his whole evening. \quad[pause]\quad So I built something to give him that evening back.''
+\end{quote}
+
+\textbf{Beat 2 --- Problem:} Your network is your most valuable asset and the hardest to search. Everyone in this room has been on both sides of this --- the awkward ask, the intro that never came. It doesn't scale with a spreadsheet.
+
+\textbf{Beat 3 --- Big Idea:} Show the one-liner (Section~\ref{sec:oneliner}). Then the thesis, slowly: \emph{``The AI does the work --- reads the request, searches the network, drafts the reply in Alex's own voice. But it never sends. Alex approves every word. That one decision is the whole design.''}
+
+\textbf{Beat 4 --- Demo:} Narrate \emph{intent}, not clicks. As it runs: \emph{``Watch the pipeline --- it's not keyword-matching, an LLM is reasoning about fit.''} Fill the $\sim$30s think-time with that. Land on the draft, then the Send/Skip gate: \emph{``And here's the moment that matters --- nothing goes out until Alex taps Send.''} (See the flows in Section~\ref{sec:testscript}. Use pre-vetted queries only.)
+
+\textbf{Beat 5 --- Under the Hood:} Two stages: a cheap SQL filter narrows 50{,}000 to 25; then an 8B LLM ranks with reasoning. \emph{``Why an 8B model? Speed and cost, on Groq's hardware --- and I characterised its failure modes instead of pretending it has none.''} (Section~\ref{sec:split} for the split story.)
+
+\textbf{Beat 6 --- Proof:} ``I didn't want to trust vibes, so I built a labelled test set. Intent 100\%, follow-up selection 100\% and deterministic. And the one I'm proudest of ---'' [Johannesburg] ``--- a city that isn't in the data comes back \emph{low-confidence}, not a confident hallucination. It fails honestly.''
+
+\textbf{Beat 7 --- Honest Reflection:} ``As a portfolio project I'd call it a strong eight. As a system I'd put real people's data into, an unauthenticated endpoint alone caps it at about a five until I fix it --- and I know exactly what those fixes are.'' Name auth, the webhook signature, rate limiting.
+
+\textbf{Beat 8 --- Close (memorise this):}
+\begin{quote}\itshape
+``This started with Alex losing an evening to his own network. Now the AI does the digging and the drafting --- and Alex still makes every call. \quad[pause]\quad That's the part I care about most: not automation that replaces judgement, but automation that respects it. \quad Thank you.''
+\end{quote}
+
+\subsection{Slide deck copy ($\sim$12 slides --- one idea each, few words, big visuals)}
+\begin{longtable}{@{}p{0.4cm}p{3.2cm}p{5cm}p{6cm}@{}}
+\toprule
+\# & Slide (on-screen) & Visual & You say (gist) \\
+\midrule
+\endhead
+1 & \textbf{AI Middleman} / your name / Isazi Vac & Clean title, logo & Nothing yet --- let it sit as you walk up. \\
+2 & ``50,000 contacts. One text message.'' & Phone with the ``know a good lawyer?'' text & Beat 1, the hook. \\
+3 & ``Your network is your least searchable asset.'' & Simple, one line & Beat 2. \\
+4 & The one-liner & The sentence, large & Beat 3, big idea. \\
+5 & ``The AI does the work. Alex makes the call.'' & Send / Edit / Skip buttons & The thesis --- your core idea. \\
+6 & \textbf{Live Demo} & Just the word, then switch to the app & Beat 4. Don't read a slide --- drive the product. \\
+7 & The pipeline, one diagram & Your stepper: retrieve $\to$ rank $\to$ draft $\to$ approve & Beat 5. \\
+8 & ``Why an 8B model?'' & Speed / cost / tradeoff, three words & Beat 5, model choice. \\
+9 & The numbers & 100\% / 100\% / ``fails honestly'' & Beat 6. Don't overclaim --- say ``44-case set''. \\
+10 & ``Honest score: 6.5/10'' & Two lenses: craft 8, production 4 & Beat 7. The disarming slide. \\
+11 & ``Next: 11 languages, real auth, scale'' & SA flag / language names & Beat 8, vision. \\
+12 & ``Thank you'' + callback to Alex & Warm, minimal & Beat 8, close. \\
+\bottomrule
+\end{longtable}
+
+\section{Mock Q\&A drill --- harder questions}
+\label{sec:mockqa}
+
+Section~\ref{sec:qa} has the core answers; these are the sharper follow-ups a senior engineer asks. For each: the \textbf{trap} (the weak instinct) and the \textbf{strong answer}. Drill them out loud.
+
+\begin{description}[leftmargin=0pt, style=nextline]
+  \item[``Why an LLM at all? A ranking model or embeddings would be cheaper and more deterministic.''] \textbf{Trap:} getting defensive. \textbf{Strong:} ``Fair --- for pure ranking you're right, embeddings + a reranker would be leaner and repeatable. I used an LLM because the task also needs \emph{reasoning you can read} (`why this person') and a \emph{drafted reply}, in one system. If I productionised, Stage 1 would likely become vector search; Stage 2 stays an LLM for the reasoning + draft.''
+  \item[``Your matching eval is a proxy and you wrote it yourself --- isn't 100\% meaningless?''] \textbf{Trap:} defending the number. \textbf{Strong:} ``You're right to push --- it's a 44-case set I authored, location/company as a relevance proxy, not blind or human-graded. It's evidence of correctness, not a benchmark. The honest headline is the \emph{deterministic} parts (intent, follow-up) hold at 100\%, and matching varies 10--12 of 12 run-to-run because it's the live model.''
+  \item[``What happens when two people share a name, or the model returns the wrong contact?''] \textbf{Strong:} ``That actually bit me --- the 8B model sometimes paired a real contact \emph{id} with a hallucinated \emph{name}. I fixed it by treating our own database as the source of truth: after ranking, every name/detail is re-hydrated from the id, and unknown ids are dropped. So the name shown and the details delivered can't disagree.'' (This is a \emph{great} answer --- it shows you find and fix your own bugs.)
+  \item[``How does this scale to thousands of concurrent users?''] \textbf{Strong:} ``Structurally the webhook already keys by sender, so many threads are fine. The real limits are (1) free-tier LLM rate caps --- a paid or self-hosted model --- and (2) my in-process background tasks, which I'd move to a durable queue so nothing's lost on restart.''
+  \item[``Is it secure?''] \textbf{Strong:} ``Not yet, and I'll tell you exactly why: the dashboard API has no auth, and the webhook signature check logs but doesn't reject. The data's synthetic today so nothing's exposed, but those two are the first things I'd fix before real data.''
+  \item[``An 8B model's isiZulu was rough --- so is the multilingual claim real?''] \textbf{Strong:} ``The \emph{architecture} supports all 11 equally --- detect, translate-for-search, reply-in-kind. \emph{Quality} isn't uniform: Afrikaans is fluent, isiZulu is understandable but grammatically rough, and that tracks training data, an industry-wide limit. I'd verify each language with a native speaker before claiming more.''
+  \item[``What would you do differently if you started over?''] \textbf{Strong:} ``Build the eval harness first, not last --- it would have caught the name-mismatch bug on day one. And design auth in from the start rather than bolting it on.''
+  \item[``What was the hardest bug?''] \textbf{Strong:} the merged rank+draft prompt returning empty completions on the 8B model $\to$ splitting into two focused calls. ``The lesson: smaller models need narrower prompts.''
+\end{description}
+
+\textbf{The formula for any hard question:} pause $\to$ restate it in one phrase $\to$ answer honestly $\to$ \emph{stop}. ``I don't know, but here's how I'd find out'' is a strong answer; bluffing to a technical room is fatal.
+
 \section{Final reminders}
 \begin{itemize}
     \item Rehearse with pre-vetted, high-confidence demo queries (finance/legal/healthcare combos in London, Dubai, Boston, Zurich) rather than improvising live.
