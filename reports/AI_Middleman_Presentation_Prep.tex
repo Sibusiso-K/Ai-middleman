@@ -85,8 +85,8 @@ The system is a linear pipeline of nine components. Being able to name and expla
 2 & Intent classification & \texttt{intent\_classifier.py} & One cheap LLM call: ``is this a contact request?'' & Cheap gate before the expensive stages; typo-tolerant by design (WhatsApp text is messy) \\
 3 & Stage 1 --- keyword filter & \texttt{keyword\_filter.py} & SQL-only, narrows 50{,}000 contacts $\to$ $\leq$25 candidates & Classic ``retrieve cheap, rank expensive'' two-stage pattern, same shape as production search/recommendation systems \\
 4 & Stage 2 --- LLM ranking & \texttt{agent.py} (\texttt{LLMAgent}) & Sends candidates to Llama 3.1 8B, returns scored/ranked matches + reasoning & Confidence threshold ($\geq$0.5) filters out garbage before Alex ever sees it \\
-5 & Draft generation & \texttt{draft\_generator.py} & Separate LLM call, writes Alex's reply in his voice & Deliberately split from ranking --- see Section~\ref{sec:split} for why \\
-6 & Conversation state & \texttt{conversation\_manager.py} + \texttt{threads}/\texttt{thread\_events} & Append-only event log per thread & Correct data model for multi-turn conversation; replaced an earlier single-row-overwrite design \\
+5 & Draft generation & \texttt{draft\_generator.py} & Separate LLM call; writes Alex's reply in his voice, suggesting 1--3 options when several fit & Deliberately split from ranking (Section~\ref{sec:split}); presents choices rather than forcing one pick (Section~\ref{sec:followup}) \\
+6 & Conversation state & \texttt{conversation\_manager.py} + \texttt{threads}/\texttt{thread\_events} & Append-only event log per thread; stores each draft's suggested people so follow-ups can be resolved against them & Correct data model for multi-turn conversation; this is what makes ``connect me with John and Sally'' work (Section~\ref{sec:followup}) \\
 7 & Human approval gate & WhatsApp interactive buttons + Flow & Alex approves before anything reaches the requester & \textbf{The single best architectural decision in the project} --- no LLM output reaches a third party unsupervised \\
 8 & Egress & \texttt{whatsapp\_client.py} & Sends the approved reply via Graph API & Straightforward, no issues found \\
 9 & Dashboard & React/TanStack + \texttt{dashboard\_api.py} & Live pipeline visualization, contacts browser, analytics, ``Sam'' simulator & The actual demo surface --- the live pipeline feed is your best visual aid \\
@@ -99,6 +99,25 @@ The system is a linear pipeline of nine components. Being able to name and expla
 Originally this was \emph{one} merged ``rank AND draft'' LLM call. On an 8B model, the combined prompt grew large enough ($\sim$20{,}000 characters with 25 candidates) that it sometimes returned empty completions. Splitting into two focused calls --- one narrow JSON-ranking task, one narrow prose-writing task --- fixed it.
 
 \textbf{The lesson to state out loud:} smaller, single-purpose prompts are more reliable than one prompt trying to do two jobs, especially on smaller models. This is a real engineering decision you made, not a default --- own it.
+
+\subsection{Conversational follow-ups --- ``connect me with John and Sally''}
+\label{sec:followup}
+
+A real introduction isn't one message --- it's a back-and-forth. The system handles that:
+
+\begin{enumerate}
+    \item \textbf{The draft offers options.} When several contacts fit, the draft names 1--3 of them (``I've got Sarah at Brookfield and Marcus at LaSalle\ldots'') and asks who Sam wants, instead of forcing a single pick.
+    \item \textbf{Sam replies naturally}, and the system resolves \emph{who} they mean --- by name (``connect me with John'', ``Sarah and Marcus, send their details''), by position (``the second one''), or all of them (``both'', ``all three'').
+    \item \textbf{Only the chosen people's details are delivered}, still behind Alex's Send/Skip approval.
+\end{enumerate}
+
+\textbf{Two things worth pointing out if asked:}
+\begin{itemize}
+    \item It resolves the pick against the conversation's stored history (the \texttt{thread\_events} log), \textbf{without a fresh LLM matching pass} --- so a follow-up is fast and cheap, and reuses the people already suggested rather than re-searching 50{,}000 contacts.
+    \item It's guarded against false positives: ``John's too junior, anyone else?'' names John but is a \emph{rejection}, so it correctly does \emph{not} connect John --- it falls through to a fresh search. Positive/negative intent cues make that distinction.
+\end{itemize}
+
+\textbf{Honest limitation:} the selection cues are English-only, so a follow-up written in another language falls through to the normal (re-matching) pipeline rather than the fast selection path.
 
 \section{Model choice, metrics, and tradeoffs}
 
@@ -216,7 +235,7 @@ S7 & No metrics, tracing, request IDs, or structured logging --- diagnosing a pr
 \section{Evaluation results}
 \label{sec:eval}
 
-A labeled, repeatable evaluation harness was built specifically to replace ad hoc manual testing (\texttt{tests/eval\_set.json} + \texttt{scripts/run\_eval.py}), covering two independent checks with zero side effects (no WhatsApp sends).
+A labeled, repeatable evaluation harness was built specifically to replace ad hoc manual testing (\texttt{tests/eval\_set.json} + \texttt{scripts/run\_eval.py}), covering three independent checks with zero side effects (no WhatsApp sends).
 
 \subsection{Intent classification --- 20 labeled messages}
 \begin{longtable}{@{}p{5cm}p{2cm}@{}}
@@ -235,12 +254,24 @@ Confusion: TP=10, FP=0, TN=10, FN=0. Messages were phrased deliberately \emph{di
 \subsection{Matching relevance --- 12 labeled queries}
 \textbf{Relevance rate: \good{12/12 (100.0\%)}}. Two of the twelve were unseen sector/location combinations added specifically to test generalization (Tech/Zurich, Recruiting/Tel Aviv) --- both matched correctly.
 
-\textbf{The most important single result:} one query was deliberately impossible --- ``Someone in Johannesburg who does corporate law'' (Johannesburg isn't in the 50k-contact seed dataset). The system returned a match at \textbf{confidence 0.35} --- correctly \emph{below} the 0.5 production threshold, meaning it would never be shown to Alex as a real match. \textbf{This is the single best evidence you can show that the system fails honestly instead of hallucinating.}
+\textbf{The most important single result:} one query was deliberately impossible --- ``Someone in Johannesburg who does corporate law'' (Johannesburg isn't in the 50k-contact seed dataset). The system returned a low-confidence match (typically $\sim$0.35, at/under the 0.5 production threshold) --- correctly refusing to present a confident answer for data it doesn't have. \textbf{This is the single best evidence you can show that the system fails honestly instead of hallucinating.}
+
+\subsection{Follow-up selection --- 12 cases, deterministic}
+\textbf{Selection accuracy: \good{12/12 (100.0\%)}}. This check runs the \texttt{\_resolve\_selected\_contacts} resolver directly --- it's a pure function, so \textbf{no LLM, no API, no Groq quota}, which makes it fully deterministic regression coverage. It verifies both the picks that must fire (by name, possessive ``John's'', position, ``both''/``all three'') and the ones that must \emph{not} (``John's too junior, anyone else?'', a bare ``yeah'', an unrelated fresh request).
+
+\subsection{The deterministic-vs-stochastic point --- a strong thing to say}
+The three checks split cleanly, and naming that split shows real testing maturity:
+\begin{itemize}
+    \item \textbf{Follow-up selection is deterministic} (pure logic) --- it is 12/12 every single run.
+    \item \textbf{Intent} is LLM-backed but very stable --- it has held at 100\%.
+    \item \textbf{Matching relevance varies run-to-run} (it's the live model's judgement) --- typically 10--12 of 12, dipping when Groq rate-limits force the weaker Featherless fallback, or when the borderline Johannesburg case lands right on the 0.5 line. That variance is expected and \emph{honest} to report, not a bug.
+\end{itemize}
+\textbf{Say it like this:} ``The parts that should be deterministic, I test deterministically; the parts that depend on the model, I measure and expect variance on.'' That distinction is exactly what senior reviewers listen for.
 
 \subsection{Honest caveats --- say these unprompted}
 \begin{itemize}
-    \item $n=20$ and $n=12$ --- real numbers, but a small sample. Say ``on a 32-case labeled test set,'' not ``we benchmarked the system.''
-    \item This test set was written immediately after fixing the underlying bugs it's now passing against --- legitimate evidence of correctness, not proof of robustness under real-world message diversity at scale.
+    \item $n=20$ intent, $n=12$ matching, $n=12$ follow-up --- real numbers, but a small sample. Say ``on a 44-case labeled test set,'' not ``we benchmarked the system.''
+    \item These test sets were written immediately after building/fixing the features they now pass against --- legitimate evidence of correctness, not proof of robustness under real-world message diversity at scale.
     \item Matching ``relevance'' is a location/company-match proxy, not human-graded relevance --- a reasonable stand-in given the synthetic dataset, but name it as a proxy if pressed.
 \end{itemize}
 
@@ -335,8 +366,9 @@ Question & Your answer \\
 \endhead
 ``Why two LLM calls instead of one?'' & The merged rank+draft prompt got too large for the 8B model and returned empty completions. Splitting into two focused, single-purpose calls fixed it --- smaller models need narrower prompts. \\
 ``Why this model?'' & Free-tier + latency constraints, on hardware (Groq LPU) built for fast inference. Traded raw reasoning depth for speed/cost, which is fine for classification-and-light-synthesis tasks like this. \\
-``How do you know it's not hallucinating matches?'' & Point to the Johannesburg test: a query for a city not in the dataset returned confidence 0.35, below the 0.5 production threshold --- it degrades honestly instead of inventing a confident answer. \\
-``What's your accuracy?'' & 100\% intent accuracy and 100\% matching relevance on a 32-case labeled test set I built --- real numbers, small sample, not a large-scale benchmark. \\
+``How do you know it's not hallucinating matches?'' & Point to the Johannesburg test: a query for a city not in the dataset returns a low confidence (typically $\sim$0.35, at or under the 0.5 production threshold) --- it degrades honestly instead of inventing a confident answer. \\
+``What's your accuracy?'' & On a 44-case labeled test set I built: intent 100\%, follow-up selection 100\% (deterministic), and matching relevance typically 10--12 of 12 --- it varies run-to-run because it's the live model's judgement. Real numbers, small sample, not a large-scale benchmark. \\
+``Can it handle a back-and-forth, like `connect me with John'?'' & Yes --- the draft suggests 1--3 people, and a follow-up naming one (or two, or `the second one', or `both') is resolved against the conversation's stored history, no fresh matching pass. It's also guarded so `John's too junior, anyone else?' is read as a rejection, not a pick. \\
 ``How would this scale?'' & The webhook already keys conversations by sender number, so many concurrent friends are supported structurally. The real constraint is the two free-tier LLM APIs --- a paid tier or self-hosted model would be the next step. \\
 ``What's the biggest risk in this design?'' & Two: operationally, the free-tier LLM rate limits (mitigated by the Groq$\to$Featherless fallback); and for production, the dashboard API has no auth yet --- \texttt{/api/contacts/\{id\}} would expose contact details. The data's synthetic today, but that's the first thing I'd fix before real data. \\
 ``Is this production-ready / is it secure?'' & Honestly, not yet --- and I can tell you exactly why. The dashboard API needs authentication (right now it's open), the webhook signature check needs to actually reject forged payloads, and there's no rate limiting or durable job queue. The ML pipeline itself is solid and injection-safe; the gap is the production security/ops layer, which is a known, scoped set of fixes rather than a redesign. \\
