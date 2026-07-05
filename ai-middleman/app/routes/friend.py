@@ -108,11 +108,26 @@ def _resolve_selected_contacts(text: str, matches: list) -> list:
     rejection rather than a pick."""
     if not matches:
         return []
-    if _NEGATIVE_CUE_RE.search(text) or not _POSITIVE_CUE_RE.search(text):
+    if _NEGATIVE_CUE_RE.search(text):
         return []
 
     low = f" {text.lower()} "
-    if re.search(r"\b(both|all of (them|those)|all three|everyone|them all)\b", low):
+
+    # Self-sufficient group selections — "both of them", "all three", "all of
+    # them", "them all", "everyone" can only mean "all the people you
+    # suggested", so they don't need a separate connect/send verb.
+    if re.search(r"\b(both|all of (them|those)|all three|them all|everyone)\b", low):
+        return list(matches)
+
+    # Everything below (a bare pronoun, a position, or a name) can also appear
+    # in a question ("what about the second one?", "are they any good?"), so it
+    # only counts as a pick when there's a positive cue and no rejection.
+    if not _POSITIVE_CUE_RE.search(text):
+        return []
+
+    # "connect me with them / dem / those" -> everyone suggested. Safe here
+    # because the positive cue above rules out the bare-question case.
+    if re.search(r"\b(them|dem|those|these)\b", low):
         return list(matches)
 
     selected, seen = [], set()
