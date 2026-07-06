@@ -1,0 +1,190 @@
+\documentclass[11pt, a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{listings}
+
+\geometry{margin=2.2cm}
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{AI Middleman --- Analytics}
+\lhead{Data \& Metrics Reference}
+\rfoot{Page \thepage}
+\hypersetup{colorlinks=true, linkcolor=black, urlcolor=blue}
+
+\definecolor{codebg}{RGB}{246,247,249}
+\definecolor{codekw}{RGB}{0,90,180}
+\definecolor{codestr}{RGB}{160,60,60}
+\lstdefinestyle{sql}{
+  language=SQL, basicstyle=\ttfamily\footnotesize, backgroundcolor=\color{codebg},
+  frame=single, rulecolor=\color{lightgray}, breaklines=true, showstringspaces=false,
+  keywordstyle=\color{codekw}\bfseries, stringstyle=\color{codestr},
+}
+
+\titleformat{\section}{\normalfont\Large\bfseries}{\thesection}{1em}{}
+\titleformat{\subsection}{\normalfont\large\bfseries}{\thesubsection}{1em}{}
+\setlist[itemize]{leftmargin=1.4em, itemsep=2pt, topsep=2pt}
+
+\title{\textbf{AI Middleman --- Analytics Reference} \\ \large What every metric means, how it's computed, and what it tells you}
+\author{For a room of data scientists \& AI engineers}
+\date{\today}
+
+\begin{document}
+\maketitle
+\thispagestyle{fancy}
+
+\section{Overview: two data sources, two questions}
+
+The dashboard's Analytics page answers two different questions from two different data sources. Keeping them separate is the single most important framing when you present this:
+
+\begin{longtable}{@{}p{3.2cm}p{5.5cm}p{6.3cm}@{}}
+\toprule
+Lens & Source & Question it answers \\
+\midrule
+\endhead
+\textbf{Conversation Insights} (dynamic) & \texttt{thread\_events} --- the append-only log of every message and decision & \emph{Demand \& behaviour}: what is Sam asking for, and how does Alex act on the AI's drafts? \\
+\textbf{Network Overview} (static) & \texttt{contacts} --- the 50{,}000-row professional network & \emph{Supply \& structure}: what does the network actually contain? \\
+\bottomrule
+\end{longtable}
+
+\textbf{Why this split matters:} the conversation lens is a live \emph{demand} signal that updates with every request; the network lens is a slowly-changing \emph{supply} picture. A mature product decision --- e.g.\ ``we get lots of fintech requests but thin fintech supply'' --- comes from reading the two together.
+
+\section{The data model}
+
+\subsection{\texttt{contacts} (supply)}
+50{,}000 rows. Relevant columns: \texttt{sector}, \texttt{specialty}, \texttt{location}, \texttt{seniority}, \texttt{relationship\_strength} (1--5), \texttt{deals\_closed}, \texttt{intros\_made}, \texttt{is\_vip}. Note: synthetic (Faker-generated) --- see caveats (Section~\ref{sec:caveats}).
+
+\subsection{\texttt{thread\_events} (demand \& behaviour)}
+An append-only event log, one row per event, with a JSONB \texttt{payload}. This is the heart of the dynamic analytics --- nothing is overwritten, so every metric is a pure aggregation over history.
+
+\begin{longtable}{@{}p{3.4cm}p{4.2cm}p{7.4cm}@{}}
+\toprule
+\texttt{event\_type} & \texttt{payload} keys & Meaning \\
+\midrule
+\endhead
+\texttt{friend\_message} & \texttt{text} & Sam sent a message (typed, or a transcribed voice note / image). \\
+\texttt{draft\_suggested} & \texttt{matches[]}, \texttt{draft\_reply}, \texttt{original\_message} & The AI produced a draft. \texttt{matches[]} carries each suggested contact's \texttt{contact\_id} --- the join key into \texttt{contacts}. \\
+\texttt{draft\_sent} & \texttt{final\_text} & Alex approved the draft (tapped Send). \\
+\texttt{draft\_edited} & \texttt{final\_text} & Alex edited before sending. \\
+\texttt{draft\_skipped} & --- & Alex declined the draft. \\
+\texttt{alex\_reply} & \texttt{text} & Alex replied to Sam in his own words (not a draft resolution). \\
+\bottomrule
+\end{longtable}
+
+\textbf{Key idea:} the draft's \texttt{matches[]} array is the bridge between the two data sources. Every ``requested'' metric is computed by extracting \texttt{contact\_id} from that JSONB array and joining back to \texttt{contacts} --- so ``most-requested sector'' is literally ``the sector of every contact the AI suggested, tallied.''
+
+\subsection{The shared extraction (used by every ``requested'' metric)}
+\begin{lstlisting}[style=sql]
+WITH suggested AS (
+  SELECT (m->>'contact_id')::int AS cid
+  FROM thread_events te
+  CROSS JOIN LATERAL jsonb_array_elements(te.payload->'matches') AS m
+  WHERE te.event_type = 'draft_suggested'
+    AND jsonb_typeof(te.payload->'matches') = 'array'
+    AND (m->>'contact_id') ~ '^[0-9]+$'   -- guard the ::int cast
+)
+\end{lstlisting}
+The regex guard filters non-numeric ids \emph{before} the cast, so a malformed payload can never error the whole query.
+
+\section{Conversation Insights (dynamic)}
+
+\subsection{Conversation summary --- the KPI row}
+\textbf{Definition.} Headline counts of the loop: messages from Sam, drafts the AI generated, and how Alex resolved them.
+\begin{lstlisting}[style=sql]
+SELECT event_type, COUNT(*) FROM thread_events GROUP BY event_type;
+-- approval_rate = drafts_sent / (drafts_sent + drafts_edited + drafts_skipped)
+\end{lstlisting}
+\textbf{Interpretation.} \texttt{approval\_rate} is the \emph{trust metric} --- the share of AI drafts Alex accepted as-is. A high rate says the model's drafts are good enough to ship untouched; a low rate says the human is doing a lot of correction. \emph{Resolved} excludes still-pending drafts, so the rate isn't diluted by drafts Alex hasn't looked at yet.
+
+\subsection{Approval funnel --- Send / Edit / Skip}
+\textbf{Definition.} The outcome distribution of every draft: Sent, Edited, Skipped, or still Pending.
+\begin{lstlisting}[style=sql]
+SELECT event_type, COUNT(*) FROM thread_events
+WHERE event_type IN ('draft_suggested','draft_sent','draft_edited','draft_skipped')
+GROUP BY event_type;
+-- Pending = draft_suggested - (sent + edited + skipped)
+\end{lstlisting}
+\textbf{Interpretation.} This is the human-in-the-loop made measurable. \textbf{Send} = the AI was right; \textbf{Edit} = right person, wrong wording (a prompt/tone problem); \textbf{Skip} = wrong call (a matching problem). The Edit-vs-Skip split is diagnostic: lots of Edits points you at the draft-generation prompt; lots of Skips points you at the ranking model. \emph{This is the chart that proves the product's core claim --- the AI never acts unsupervised, and here's exactly how often the human overrides it.}
+
+\subsection{Most-requested sectors --- the demand signal}
+\textbf{Definition.} The sector of every contact the AI has suggested, tallied across all drafts.
+\begin{lstlisting}[style=sql]
+-- (uses the `suggested` CTE above)
+SELECT co.sector AS name, COUNT(*) AS value
+FROM suggested s JOIN contacts co ON co.id = s.cid
+WHERE co.sector IS NOT NULL AND co.sector != ''
+GROUP BY co.sector ORDER BY value DESC;
+\end{lstlisting}
+\textbf{Interpretation.} A proxy for \emph{demand}. It measures what requests actually pull out of the network, not what the network happens to hold. Read against ``Contacts by Sector'' in the Network Overview: where demand outruns supply, that's a sourcing gap; where supply outruns demand, that's dormant inventory.
+
+\subsection{Top services requested}
+\textbf{Definition.} Same extraction, grouped by \texttt{specialty} instead of \texttt{sector} --- the fine-grained ``what skill was actually wanted.''
+\begin{lstlisting}[style=sql]
+SELECT co.specialty AS name, COUNT(*) AS value
+FROM suggested s JOIN contacts co ON co.id = s.cid
+WHERE co.specialty IS NOT NULL AND co.specialty != ''
+GROUP BY co.specialty ORDER BY value DESC LIMIT 8;
+\end{lstlisting}
+\textbf{Interpretation.} Finer than sector --- e.g.\ ``Private Equity'' and ``Series A VC'' both live under Finance but are very different asks. This is the level at which you'd decide what expertise to grow in the network.
+
+\subsection{Most-recommended people}
+\textbf{Definition.} The individual contacts the AI surfaces most often across all conversations.
+\begin{lstlisting}[style=sql]
+SELECT co.full_name, co.title, co.company, COUNT(*) AS value
+FROM suggested s JOIN contacts co ON co.id = s.cid
+GROUP BY co.id, co.full_name, co.title, co.company
+ORDER BY value DESC LIMIT 8;
+\end{lstlisting}
+\textbf{Interpretation.} Your ``super-connectors'' --- the people the model leans on. Useful two ways: (1) they're candidates for over-exposure (you don't want to burn one contact with every intro), and (2) a sanity check on the ranker --- if one person dominates unreasonably, the scoring may be biased.
+
+\section{Network Overview (static, from \texttt{contacts})}
+
+These describe the \emph{supply} side. All are direct aggregations of the 50{,}000-row table.
+
+\begin{longtable}{@{}p{4.2cm}p{5.2cm}p{5.6cm}@{}}
+\toprule
+Metric & Computation & Interpretation \\
+\midrule
+\endhead
+KPI row & \texttt{COUNT}, \texttt{COUNT(is\_vip)}, \texttt{AVG(relationship\_strength)}, \texttt{COUNT(DISTINCT sector)} & Headline scale of the network. \\
+Contacts by seniority & \texttt{GROUP BY seniority} & Is the network top-heavy (Partner/MD) or junior? Affects who you can credibly introduce. \\
+Relationship-strength distribution & \texttt{GROUP BY relationship\_strength} (1--5 histogram) & How many ties are strong enough to actually vouch for. The right tail is the usable network. \\
+VIP vs standard & \texttt{COUNT WHERE is\_vip} & Share of high-value contacts. \\
+Strength vs intros (scatter) & sampled \texttt{(relationship\_strength, intros\_made)} & Do stronger ties actually get used more? A weak correlation flags under-utilised strong ties. \\
+Avg.\ deals by sector & \texttt{AVG(deals\_closed) GROUP BY sector} & Which sectors are most transactionally active. \\
+Top specialties & \texttt{GROUP BY specialty} & What the network is deepest in (supply), to contrast with demand above. \\
+\bottomrule
+\end{longtable}
+
+\textbf{The scatter is sampled} (\texttt{ORDER BY random() LIMIT 500}) so the chart stays responsive; everything else aggregates the full table.
+
+\section{Methodology \& caveats --- say these unprompted}
+\label{sec:caveats}
+\begin{itemize}
+  \item \textbf{Synthetic data.} The 50{,}000 contacts are Faker-generated. The network-overview shapes are therefore artefacts of the generator, not a real market --- present them as ``the kind of insight this surfaces,'' not findings about a real network.
+  \item \textbf{Small conversation sample.} The dynamic metrics are computed over real events, but the sample is a demo's worth of traffic (tens to low-hundreds of drafts). Treat the \emph{method} as the deliverable; the numbers will stabilise with volume.
+  \item \textbf{``Requested'' is a proxy.} It measures what the AI \emph{suggested} in response to a request, not a parse of Sam's literal words. It's a good demand proxy because suggestions are gated by a confidence threshold and Alex's approval --- but it inherits any bias in the ranker.
+  \item \textbf{Append-only, so metrics are reproducible.} Because \texttt{thread\_events} is never mutated, every number is a deterministic re-aggregation --- rerun the query, get the same answer. No hidden state.
+  \item \textbf{Approval rate excludes pending drafts} by construction, so it can't be gamed by drafts Alex simply hasn't opened.
+\end{itemize}
+
+\section{Reading it in the room --- the one-line takeaways}
+\begin{itemize}
+  \item \textbf{Approval funnel:} ``This is the human-in-the-loop as a number. 93\% of drafts were shipped as-is; the rest, Alex overrode --- and the Edit-vs-Skip split tells me whether to fix the wording model or the matching model.''
+  \item \textbf{Demand vs supply:} ``Conversation Insights is demand; Network Overview is supply. Reading them together is where the product decisions are.''
+  \item \textbf{Provenance:} ``Every dynamic number traces to an append-only event log via one JSONB-to-contacts join --- reproducible, no overwritten state.''
+  \item \textbf{Honesty:} ``The network data is synthetic and the conversation sample is small --- so I'm showing you the \emph{instrumentation}, which is real, not market findings.''
+\end{itemize}
+
+\end{document}

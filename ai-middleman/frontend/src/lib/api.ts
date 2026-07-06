@@ -35,6 +35,18 @@ export type SkillStat = { name: string; count: number };
 export type SeniorityStat = { name: string; value: number };
 export type StrengthBucket = { level: number; value: number };
 export type VipSlice = { name: string; value: number };
+export type ConversationSummary = {
+  messages_from_sam: number;
+  drafts_generated: number;
+  drafts_sent: number;
+  drafts_edited: number;
+  drafts_skipped: number;
+  alex_replies: number;
+  approval_rate: number;
+};
+export type FunnelSlice = { name: string; value: number };
+export type RequestedStat = { name: string; value: number };
+export type RequestedContact = { name: string; title: string | null; company: string | null; value: number };
 
 export type ContactRow = {
   id: number;
@@ -102,6 +114,11 @@ export const api = {
   analyticsSeniority: () => request<SeniorityStat[]>("/api/analytics/seniority"),
   analyticsStrengthDistribution: () => request<StrengthBucket[]>("/api/analytics/strength-distribution"),
   analyticsVipBreakdown: () => request<VipSlice[]>("/api/analytics/vip-breakdown"),
+  conversationSummary: () => request<ConversationSummary>("/api/analytics/conversation-summary"),
+  approvalFunnel: () => request<FunnelSlice[]>("/api/analytics/approval-funnel"),
+  requestedSectors: () => request<RequestedStat[]>("/api/analytics/requested-sectors"),
+  requestedServices: () => request<RequestedStat[]>("/api/analytics/requested-services"),
+  topRequestedContacts: () => request<RequestedContact[]>("/api/analytics/top-requested-contacts"),
   filterOptions: () => request<FilterOptions>("/api/filters/options"),
   activity: (limit = 10) => request<ActivityEvent[]>(`/api/activity?limit=${limit}`),
   contacts: (params: {

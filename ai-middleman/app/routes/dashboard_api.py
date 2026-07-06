@@ -171,6 +171,127 @@ async def analytics_vip_breakdown(request: Request):
     ]
 
 
+# --- Conversation analytics: computed from the live thread_events log, not the
+# static contacts table. These reflect what Sam actually asked for and how Alex
+# acted on the AI's drafts. -------------------------------------------------
+
+# Reusable CTE: every contact suggested in a draft, one row per (draft, contact),
+# safely extracting the numeric contact_id from the draft's JSONB matches array.
+_SUGGESTED_CONTACTS_CTE = """
+    WITH suggested AS (
+        SELECT (m->>'contact_id')::int AS cid
+        FROM thread_events te
+        CROSS JOIN LATERAL jsonb_array_elements(te.payload->'matches') AS m
+        WHERE te.event_type = 'draft_suggested'
+          AND jsonb_typeof(te.payload->'matches') = 'array'
+          AND (m->>'contact_id') ~ '^[0-9]+$'
+    )
+"""
+
+
+@router.get("/analytics/conversation-summary")
+async def conversation_summary(request: Request):
+    """Headline conversation KPIs from thread_events: messages from Sam, drafts
+    the AI generated, and how Alex resolved them (the approval rate)."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT event_type, COUNT(*) AS n FROM thread_events GROUP BY event_type"
+        )
+    counts = {r["event_type"]: r["n"] for r in rows}
+    suggested = counts.get("draft_suggested", 0)
+    sent = counts.get("draft_sent", 0)
+    edited = counts.get("draft_edited", 0)
+    skipped = counts.get("draft_skipped", 0)
+    resolved = sent + edited + skipped
+    return {
+        "messages_from_sam": counts.get("friend_message", 0),
+        "drafts_generated": suggested,
+        "drafts_sent": sent,
+        "drafts_edited": edited,
+        "drafts_skipped": skipped,
+        "alex_replies": counts.get("alex_reply", 0),
+        "approval_rate": round(sent / resolved, 3) if resolved else 0.0,
+    }
+
+
+@router.get("/analytics/approval-funnel")
+async def approval_funnel(request: Request):
+    """How Alex acted on the AI's drafts — the Send / Edit / Skip breakdown
+    (plus any still pending), for a funnel or donut chart."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT event_type, COUNT(*) AS n FROM thread_events
+            WHERE event_type IN ('draft_suggested','draft_sent','draft_edited','draft_skipped')
+            GROUP BY event_type
+            """
+        )
+    c = {r["event_type"]: r["n"] for r in rows}
+    suggested = c.get("draft_suggested", 0)
+    sent, edited, skipped = c.get("draft_sent", 0), c.get("draft_edited", 0), c.get("draft_skipped", 0)
+    pending = max(0, suggested - (sent + edited + skipped))
+    return [
+        {"name": "Sent", "value": sent},
+        {"name": "Edited", "value": edited},
+        {"name": "Skipped", "value": skipped},
+        {"name": "Pending", "value": pending},
+    ]
+
+
+@router.get("/analytics/requested-sectors")
+async def requested_sectors(request: Request):
+    """Which sectors Sam's requests actually pull in — the sector of every
+    contact the AI suggested, tallied. Reflects demand, not just supply."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            _SUGGESTED_CONTACTS_CTE + """
+            SELECT co.sector AS name, COUNT(*) AS value
+            FROM suggested s JOIN contacts co ON co.id = s.cid
+            WHERE co.sector IS NOT NULL AND co.sector != ''
+            GROUP BY co.sector ORDER BY value DESC
+            """
+        )
+    return [dict(r) for r in rows]
+
+
+@router.get("/analytics/requested-services")
+async def requested_services(request: Request, limit: int = Query(8, le=30)):
+    """The top specialties/services Sam's requests surface — the specialty of
+    every suggested contact, tallied."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            _SUGGESTED_CONTACTS_CTE + """
+            SELECT co.specialty AS name, COUNT(*) AS value
+            FROM suggested s JOIN contacts co ON co.id = s.cid
+            WHERE co.specialty IS NOT NULL AND co.specialty != ''
+            GROUP BY co.specialty ORDER BY value DESC LIMIT $1
+            """,
+            limit,
+        )
+    return [dict(r) for r in rows]
+
+
+@router.get("/analytics/top-requested-contacts")
+async def top_requested_contacts(request: Request, limit: int = Query(8, le=30)):
+    """The people the AI recommends most often across all conversations."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            _SUGGESTED_CONTACTS_CTE + """
+            SELECT co.full_name AS name, co.title, co.company, COUNT(*) AS value
+            FROM suggested s JOIN contacts co ON co.id = s.cid
+            GROUP BY co.id, co.full_name, co.title, co.company
+            ORDER BY value DESC LIMIT $1
+            """,
+            limit,
+        )
+    return [dict(r) for r in rows]
+
+
 @router.get("/filters/options")
 async def filter_options(request: Request):
     """Return the distinct sector/location/seniority values for the Contacts page filters."""
