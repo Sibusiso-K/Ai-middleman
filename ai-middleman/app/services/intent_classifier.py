@@ -3,12 +3,14 @@ intent_classifier.py — Detects whether an incoming WhatsApp message is a
 contact request that Alex should act on, and in which language it was
 written.
 
-Friends may write to Alex in English or in any of South Africa's other 10
-official languages (or a natural code-switched mix). classify() does intent
-detection, language detection, and an English gloss of the message in a
-single LLM call — no extra round trip is added for the common English case,
-and the English gloss lets Stage 1's keyword filter (a plain SQL match
-against English contact data) work correctly for non-English messages too.
+Friends may write to Alex in English or Afrikaans (or a natural
+code-switched mix) — see sa_languages.py for why the scope is these two
+and not all 11 of South Africa's official languages. classify() does
+intent detection, language detection, and an English gloss of the
+message in a single LLM call — no extra round trip is added for the
+common English case, and the English gloss lets Stage 1's keyword filter
+(a plain SQL match against English contact data) work correctly for
+Afrikaans messages too.
 """
 
 import asyncio
@@ -61,14 +63,14 @@ class IntentClassifier:
         callers use it to re-run the keyword filter when the original text
         wouldn't match anything in the (English) contacts table.
         """
-        languages_list = ", ".join(SA_LANGUAGES)
+        languages_list = " or ".join(SA_LANGUAGES)
         prompt = f"""You are analysing a WhatsApp message sent to Alex, a well-connected business professional in South Africa.
 
-Friends may write to him in English or in any of South Africa's other official languages, and often code-switch naturally between English and another language in the same message. South Africa's 11 official languages: {languages_list}.
+Friends may write to him in {languages_list}, and sometimes code-switch naturally between the two in the same message.
 
 Do all three of the following in one pass:
 
-1. Identify which language the message is written in. Pick the single best match from the list above. If it's already in English, or is mostly English with just a greeting/aside in another language, say "English".
+1. Identify which language the message is written in: {languages_list} only — no other option exists. If it's already in English, is mostly English with just a greeting/aside in Afrikaans, is short/ambiguous, or you are not confident it is genuinely Afrikaans, say "English". Only say "Afrikaans" if you are confident the message is substantially written in Afrikaans.
 2. Decide: is this message asking Alex to introduce someone, recommend a contact, refer someone, or connect the sender with a person from Alex's professional network?
 3. Give an English rendering of the message. If it's already in English, repeat it unchanged. Translate meaning, not word-for-word — keep any names, companies, and locations exactly as written.
 
@@ -97,7 +99,7 @@ Examples that are NOT contact requests:
 Message: "{message}"
 
 Reply with ONLY this exact JSON shape, nothing else — no markdown, no explanation:
-{{"language": "<one of the 11 languages above>", "is_request": true or false, "english_query": "<English rendering of the message>"}}"""
+{{"language": "English or Afrikaans, nothing else", "is_request": true or false, "english_query": "<English rendering of the message>"}}"""
 
         last_error = None
         for config in self.configs:
@@ -122,9 +124,18 @@ Reply with ONLY this exact JSON shape, nothing else — no markdown, no explanat
                         content = response.json()["choices"][0]["message"]["content"]
                         try:
                             data = extract_json(content)
+                            detected_language = data.get("language") or "English"
+                            if detected_language not in SA_LANGUAGES:
+                                # Defensive fallback: despite the prompt constraining the
+                                # options to SA_LANGUAGES, small models occasionally
+                                # hallucinate a third value. Never trust an option outside
+                                # the supported set — default to English rather than risk
+                                # drafting in a language nobody asked for.
+                                slog(f"[Intent] model returned unsupported language {detected_language!r} — defaulting to English")
+                                detected_language = "English"
                             result = {
                                 "is_request": bool(data.get("is_request")),
-                                "language": data.get("language") or "English",
+                                "language": detected_language,
                                 "english_query": data.get("english_query") or message,
                             }
                             slog(f"[Intent/{config['name']}] {result['language']}, is_request={result['is_request']} (attempt {attempt})")

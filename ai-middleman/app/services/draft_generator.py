@@ -67,17 +67,18 @@ class DraftGenerator:
         is_first_message let the model continue an ongoing thread naturally
         instead of opening every single reply with a fresh greeting.
 
-        language is whichever of South Africa's official languages Sam wrote
-        in (from IntentClassifier.classify) — the reply is written in that
-        same language, not translated to English, so the conversation reads
-        naturally on Sam's side.
+        language is English or Afrikaans — whichever IntentClassifier.classify
+        detected Sam wrote in (see sa_languages.py for why the scope is these
+        two, not all 11 of South Africa's official languages) — the reply is
+        written in that same language, not translated to English, so the
+        conversation reads naturally on Sam's side.
         """
         if not matches:
-            # Static fallback, deliberately English-only: translating it into
-            # 10 more languages without a native speaker to verify each one
-            # would risk shipping wrong or awkward phrasing. The one path
-            # that does need to work in Sam's language — a real match — is
-            # generated fresh by the model above, in the requested language.
+            # Static fallback, deliberately English-only: translating it
+            # without a native speaker to verify it would risk shipping wrong
+            # or awkward phrasing. The one path that does need to work in
+            # Sam's language — a real match — is generated fresh by the model
+            # above, in the requested language.
             return "Nothing great in my network for this one — let me ask around and get back to you 🤔"
 
         # Build contact context for the prompt

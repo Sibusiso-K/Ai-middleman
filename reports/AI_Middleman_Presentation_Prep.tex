@@ -199,6 +199,7 @@ This is the biggest live-demo risk, and it was directly stress-tested (Section~\
 8 & No automated evaluation harness existed for intent/matching/draft quality before this week & \badc{The single biggest gap for a data-science-role narrative} & \good{Now exists} --- see Section~\ref{sec:eval}; also wired into CI (GitHub Actions runs the unit + migration suites on every push) \\
 9 & Entire pipeline depends on two free-tier LLM APIs with no paid/self-hosted fallback & Production risk & Known, by design (budget constraint) \\
 10 & Stage 1 (keyword filter) is a plain SQL keyword match against English contact data --- a non-English message would match nothing, so Stage 2's ranking never even saw candidates, regardless of how good it was & \badc{Was the real blocker for multilingual support, not the draft/image issues above} & \good{Fixed} --- see Section~\ref{sec:multilingual} \\
+11 & Language was re-detected independently on every message with no memory of the conversation --- a short, ambiguous follow-up (``anyone else'') randomly flipped a fluent Afrikaans conversation into garbled isiZulu, and isiZulu-family output was frequently ungrammatical even when correctly triggered & \badc{The multilingual feature was actively unreliable, caught from real conversation logs before the demo} & \good{Fixed} --- scope reduced to English + Afrikaans (the only language verified fluent); added a ``sticky'' rule so short messages inherit the conversation's established language instead of re-guessing; see Section~\ref{sec:multilingual} \\
 \bottomrule
 \end{longtable}
 
@@ -315,45 +316,49 @@ Blended, as a system claiming ``production-ready'' & \textbf{6.5 / 10} \\
     \item \badc{Non-enforcing webhook signature (finding S2).} Forged Meta-shaped payloads are processed anyway --- the authentication code exists but doesn't reject.
     \item \textbf{Fails open under LLM outage (S3)} --- floods Alex with drafts for non-requests rather than failing safe.
     \item \textbf{No durability for in-flight work (S5), no input caps (S4), no rate limiting, no metrics/tracing (S7).} All the ``day-2 operations'' scaffolding a production system needs is absent.
-    \item \textbf{Eval set is small and self-authored} --- real numbers, but not blind, adversarial, or production-scale; and multilingual quality is verified for only 2 of 11 languages.
+    \item \textbf{Eval set is small and self-authored} --- real numbers, but not blind, adversarial, or production-scale; and multilingual support is deliberately scoped to English + Afrikaans only, after testing found the other 9 languages unreliable (Section~\ref{sec:multilingual}).
     \item \textbf{Depends entirely on two free-tier LLM APIs} with rate limits and no paid/self-hosted path.
 \end{itemize}
 
 \textbf{The crucial point:} none of the production gaps are \emph{design rot} --- they're missing security/ops layers, each fixable in hours (add an API key or session check; gate the signature bypass behind an env flag; add a length cap; move background work to a durable queue). The core ML engineering is sound. That's exactly the profile of a strong junior who is ready to learn production hardening --- which is the honest story to tell, and a better one than pretending it's finished.
 
-\section{Multilingual support for South Africa's 11 official languages}
+\section{Multilingual support --- English and Afrikaans, by design}
 \label{sec:multilingual}
 
-\textbf{Implemented and live-tested.} The real blocker turned out not to be the draft or image prompts --- it was Stage 1 (the keyword filter), a plain SQL keyword match against English contact data. A message in isiZulu would match nothing in that search regardless of how well Stage 2's LLM could reason about it, so Stage 2 never even got candidates to rank. Fixing that, not just the more visible symptoms, was the actual engineering problem.
+\textbf{Scoped down deliberately, after live testing found real problems.} The pipeline originally attempted all 11 of South Africa's official languages. Two concrete failure modes showed up in real conversation logs before the demo, and both were fixed by narrowing scope rather than patching around them:
 
-\subsection{What was built}
+\begin{enumerate}
+    \item \textbf{Wrong-language drafts.} Language was re-detected independently on every message, with no memory of what language the conversation had actually been in. A message in Afrikaans (``ek soek William williams'') came back drafted in isiZulu. A plain two-word English follow-up (``anyone else'') also came back in garbled isiZulu. Short, ambiguous messages carry almost no language signal, and re-guessing from scratch on them is exactly what caused a conversation to randomly switch language mid-thread.
+    \item \textbf{Garbled output on lower-resource languages.} Even when isiZulu \emph{was} correctly identified, the 8B model's isiZulu output was frequently not real, grammatical isiZulu --- consistent with those languages being far less represented in the model's training data than English or Afrikaans.
+\end{enumerate}
+
+\textbf{The fix, not a workaround:}
 \begin{itemize}
-    \item \textbf{One combined LLM call, not three.} \texttt{IntentClassifier.classify()} now returns intent, detected language, and an English rendering of the message in a single call --- the same call that already ran, just returning richer JSON instead of plain YES/NO. \textbf{No extra network round trip was added.}
-    \item \textbf{Stage 1 re-runs only when needed.} If the detected language isn't English, the keyword filter re-runs on the English rendering --- one cheap extra SQL query (Stage 1 has no LLM call in it), so English messages, the common case today, pay nothing extra in latency.
-    \item \textbf{Replies match the sender's language}, with natural code-switching for English contact names and company names --- the same way South Africans actually speak, not a stiff full translation.
-    \item \textbf{Image descriptions no longer force English.} The vision prompt's hardcoded ``in plain English'' instruction was removed; any text found in an image (e.g.\ a business-card note) is transcribed verbatim in its own language, not translated.
-    \item \textbf{Voice notes already worked} --- Whisper auto-detects language and transcribes in it, no code change needed --- and now, because voice/image messages funnel through the exact same classify-and-reply pipeline as typed text, they automatically inherit the same language handling with zero extra code.
+    \item \textbf{Scope reduced to English and Afrikaans only} (\texttt{sa\_languages.py}). Afrikaans is the one additional language that consistently produced fluent, grammatical output in testing --- likely because it's close to English/Dutch, both far better-represented in the model's training data. The classifier's prompt can no longer select any of the other nine languages, and a defensive check discards any hallucinated value outside the two-item set, forcing English as the safe default.
+    \item \textbf{Language is now ``sticky.''} A message under 4 words inherits the conversation's most recently confirmed language instead of being re-classified from a near-blank signal; a message with real content (4+ words) is still freely re-evaluated, so a genuine language switch mid-conversation still works correctly. This is what makes the conversation \emph{read like a real one} instead of flickering between languages sentence to sentence.
+    \item The architecture underneath (one combined intent+language+translation LLM call, Stage 1 re-run on the English rendering only when needed, image/voice inheriting the same handling for free) is unchanged from the original design --- only the language \emph{set} and the per-message \emph{re-detection} policy changed.
 \end{itemize}
 
-\subsection{Live test results --- the honest version}
-\begin{longtable}{@{}p{2.2cm}p{6.8cm}p{6.5cm}@{}}
+\subsection{Live test results after the fix}
+\begin{longtable}{@{}p{4.5cm}p{5.5cm}p{5.5cm}@{}}
 \toprule
-Language & Detected \& translated for search & Draft quality \\
+Scenario & What happens & Result \\
 \midrule
 \endhead
-Afrikaans & Correct --- e.g.\ ``Ken jy iemand wat 'n regsgeleerde is in Londen?'' correctly rendered as ``Do you know anyone who is a corporate lawyer in London?'' & \good{Fluent and natural}, with correct code-switching (contact and company names kept in English inside the Afrikaans sentence) \\
-isiZulu & Correct --- language and intent both identified correctly, English rendering was accurate & \warnc{Rough} --- real grammatical and lexical issues visible in the live output, consistent with an 8B model having materially weaker isiZulu fluency than Afrikaans or English \\
+Afrikaans request (``Ken jy iemand wat 'n korporatiewe prokureur is in Londen?'') & Detected as Afrikaans, English rendering used for search, draft written in Afrikaans & \good{Fluent, natural Afrikaans} \\
+Short follow-up right after (``anyone else'') --- the exact phrase that previously broke into garbled isiZulu & Sticky rule inherits Afrikaans from the prior message instead of re-guessing on 2 words & \good{Stays in fluent Afrikaans} --- the bug is fixed \\
+Substantial English message later in the same thread (10 words) & Enough content to freely re-evaluate; correctly switches back to English & \good{Correctly detected and drafted in English} \\
 \bottomrule
 \end{longtable}
 
-\textbf{The honest takeaway, worth saying out loud if asked:} the \emph{architecture} now supports all 11 languages equally --- detection, search, and reply-in-kind all work the same way regardless of which language is used. \emph{Output quality} does not --- it tracks how much training data each language had in the underlying model, which is a well-documented, industry-wide limitation of every open LLM, not something fixable in this codebase. Expect this same pattern (Afrikaans/English strong, isiXhosa/Sesotho workable, isiNdebele/Xitsonga/Tshivenda/siSwati/Sepedi/Setswana weaker) across the remaining 9 untested languages, based on the same training-data asymmetry that explains the Afrikaans/isiZulu gap actually observed.
+\textbf{Say this if asked why not all 11:} ``I tested against all 11 and found isiZulu-family output was frequently ungrammatical, and that short messages caused the detected language to flicker randomly mid-conversation. Rather than demo something that could embarrass itself live, I scoped it down to the two languages that are actually reliable --- English and Afrikaans --- and fixed the flickering with a sticky-language rule keyed off message length. That's a real engineering tradeoff: breadth for reliability.''
 
 \subsection{What's still open}
 \begin{itemize}
-    \item Only 2 of the 11 languages have been tested end-to-end so far --- the rest are architecturally supported but unverified.
-    \item No native-speaker review of any translation or draft has been done yet.
-    \item The evaluation harness (Section~\ref{sec:eval}) doesn't yet include multilingual test cases --- adding a handful, ideally reviewed by a native speaker, would close the biggest remaining gap in this feature's credibility.
-    \item The static ``no match found'' fallback string is deliberately still English-only --- translating it into 10 more languages without a native speaker to check each one risked shipping wrong phrasing for an edge case, so it was left alone rather than guessed at.
+    \item Only English and Afrikaans are supported by design; the other 9 languages are a documented future direction, not a current claim.
+    \item No native-speaker review of Afrikaans output has been done yet --- fluency was judged by a non-native speaker (me), which is a real limitation to name if pressed.
+    \item The evaluation harness (Section~\ref{sec:eval}) doesn't yet include automated language-detection or draft-language test cases.
+    \item The static ``no match found'' fallback string is deliberately still English-only.
 \end{itemize}
 
 \section{Anticipated Q\&A cheat sheet}
@@ -373,8 +378,8 @@ Question & Your answer \\
 ``What's the biggest risk in this design?'' & Two: operationally, the free-tier LLM rate limits (mitigated by the Groq$\to$Featherless fallback); and for production, the dashboard API has no auth yet --- \texttt{/api/contacts/\{id\}} would expose contact details. The data's synthetic today, but that's the first thing I'd fix before real data. \\
 ``Is this production-ready / is it secure?'' & Honestly, not yet --- and I can tell you exactly why. The dashboard API needs authentication (right now it's open), the webhook signature check needs to actually reject forged payloads, and there's no rate limiting or durable job queue. The ML pipeline itself is solid and injection-safe; the gap is the production security/ops layer, which is a known, scoped set of fixes rather than a redesign. \\
 ``What did you learn stress-testing your own project?'' & That the obvious-looking bugs weren't the important ones. The real issues were an unauthenticated endpoint that bypassed my own privacy model, and a fallback path that had never actually been exercised. Finding those in my own code is the thing I'm most glad I did before standing up here. \\
-``Does it support South Africa's 11 languages?'' & Architecturally, yes --- detection, translation-for-search, and reply-in-kind all work regardless of which language is used, verified live for Afrikaans and isiZulu. Quality is not uniform: Afrikaans came back fluent, isiZulu had real grammatical rough edges --- an 8B model's fluency tracks how much training data each language had, which is a known industry-wide limitation, not something I can fix in this codebase. \\
-``What would you build next?'' & A larger, ideally human-labeled evaluation set covering all 11 languages with native-speaker review, plus scaling the existing English-only eval set to more real-world message diversity --- both are scoped, and the multilingual pipeline itself is already built and working, just under-tested. \\
+``Does it support South Africa's 11 languages?'' & By design, just English and Afrikaans. I tested against more and found real problems --- isiZulu output was often ungrammatical, and short messages caused the detected language to flip randomly mid-conversation. I fixed the flipping (a ``sticky'' rule) and scoped the language set down to the two that are actually reliable, rather than demo something that could embarrass itself live. \\
+``What would you build next?'' & Native-speaker review of the Afrikaans output (judged so far by a non-native speaker), then re-attempting the other 9 languages one at a time with real verification before re-adding any of them --- plus scaling the existing eval set to more real-world message diversity. \\
 ``Does Alex have full control?'' & Yes --- every single reply is gated behind Alex approving Send/Edit/Skip on his real WhatsApp. No AI-generated text reaches a third party unsupervised. \\
 \bottomrule
 \end{longtable}
@@ -414,12 +419,13 @@ Then a follow-up by name, e.g.\ ``Sarah sounds perfect, send me her details''.
 \end{itemize}
 Johannesburg isn't in the dataset, so the match comes back low-confidence / no confident hit --- proof it fails honestly instead of inventing someone. \textbf{This is your best answer to ``how do you know it isn't hallucinating?''}
 
-\subsection{Flow 5 --- multilingual (South Africa's 11 languages)}
-\begin{itemize}
-    \item Afrikaans: ``Ken jy iemand wat 'n korporatiewe prokureur is in Londen?''
-    \item isiZulu: ``Ngidinga ummeli waseLondon wamashishini''
-\end{itemize}
-The reply comes back in the same language. \textbf{Be honest:} Afrikaans is fluent; isiZulu is understandable but grammatically rough --- an 8B-model limitation, not a bug.
+\subsection{Flow 5 --- multilingual (English + Afrikaans, by design)}
+\begin{enumerate}
+    \item Afrikaans: ``Ken jy iemand wat 'n korporatiewe prokureur is in Londen?'' $\rightarrow$ fluent Afrikaans draft.
+    \item Immediately after, a short follow-up: ``anyone else'' $\rightarrow$ \textbf{stays in Afrikaans} (the sticky-language fix --- this exact phrase used to randomly break into garbled isiZulu).
+    \item Then a substantial English message: ``Actually never mind, I need a healthcare investor in Boston instead'' $\rightarrow$ correctly switches back to English.
+\end{enumerate}
+\textbf{Be honest if asked about the other 9 languages:} tested, found isiZulu-family output frequently ungrammatical and short messages caused random language-flipping mid-conversation --- scoped down to English + Afrikaans rather than risk that live.
 
 \subsection{Flow 6 --- the guard (should NOT produce a draft)}
 \begin{itemize}
@@ -460,7 +466,7 @@ Everything serves that idea. For this audience (Isazi engineers judging a data-s
 5 & Under the Hood & 3m & Two-stage retrieve-then-rank, model choice, the tradeoffs. Prove you understand it deeply. \\
 6 & Proof & 2m & Eval numbers (honest) + the Johannesburg ``fails honestly'' moment. \\
 7 & Honest Reflection & 1.5m & The two-lens 6.5/10. What's ready, what isn't, what's next. \textbf{This beat wins the job.} \\
-8 & Vision + Close & 1m & Multilingual for SA's 11 languages; callback to Alex; thank you. \\
+8 & Vision + Close & 1m & Multilingual roadmap beyond English/Afrikaans; callback to Alex; thank you. \\
 \bottomrule
 \end{longtable}
 
@@ -505,7 +511,7 @@ Only two things are memorised word-for-word: the \textbf{opening} and the \textb
 8 & ``Why an 8B model?'' & Speed / cost / tradeoff, three words & Beat 5, model choice. \\
 9 & The numbers & 100\% / 100\% / ``fails honestly'' & Beat 6. Don't overclaim --- say ``44-case set''. \\
 10 & ``Honest score: 6.5/10'' & Two lenses: craft 8, production 4 & Beat 7. The disarming slide. \\
-11 & ``Next: 11 languages, real auth, scale'' & SA flag / language names & Beat 8, vision. \\
+11 & ``Next: more languages, real auth, scale'' & SA flag / English + Afrikaans today & Beat 8, vision. \\
 12 & ``Thank you'' + callback to Alex & Warm, minimal & Beat 8, close. \\
 \bottomrule
 \end{longtable}
@@ -521,7 +527,7 @@ Section~\ref{sec:qa} has the core answers; these are the sharper follow-ups a se
   \item[``What happens when two people share a name, or the model returns the wrong contact?''] \textbf{Strong:} ``That actually bit me --- the 8B model sometimes paired a real contact \emph{id} with a hallucinated \emph{name}. I fixed it by treating our own database as the source of truth: after ranking, every name/detail is re-hydrated from the id, and unknown ids are dropped. So the name shown and the details delivered can't disagree.'' (This is a \emph{great} answer --- it shows you find and fix your own bugs.)
   \item[``How does this scale to thousands of concurrent users?''] \textbf{Strong:} ``Structurally the webhook already keys by sender, so many threads are fine. The real limits are (1) free-tier LLM rate caps --- a paid or self-hosted model --- and (2) my in-process background tasks, which I'd move to a durable queue so nothing's lost on restart.''
   \item[``Is it secure?''] \textbf{Strong:} ``Not yet, and I'll tell you exactly why: the dashboard API has no auth, and the webhook signature check logs but doesn't reject. The data's synthetic today so nothing's exposed, but those two are the first things I'd fix before real data.''
-  \item[``An 8B model's isiZulu was rough --- so is the multilingual claim real?''] \textbf{Strong:} ``The \emph{architecture} supports all 11 equally --- detect, translate-for-search, reply-in-kind. \emph{Quality} isn't uniform: Afrikaans is fluent, isiZulu is understandable but grammatically rough, and that tracks training data, an industry-wide limit. I'd verify each language with a native speaker before claiming more.''
+  \item[``Why only 2 of 11 languages?''] \textbf{Trap:} apologising for it. \textbf{Strong:} ``I actually tried more, and testing surfaced two real bugs --- isiZulu output was often ungrammatical, and short messages caused the detected language to flip randomly mid-conversation, once turning a fluent Afrikaans thread into garbled isiZulu on a two-word reply. Rather than ship something that could embarrass itself live, I fixed the flipping and scoped the language set down to the two that are reliable. That's a deliberate reliability-over-breadth tradeoff, found and fixed from real conversation logs, not a limitation I didn't notice.''
   \item[``What would you do differently if you started over?''] \textbf{Strong:} ``Build the eval harness first, not last --- it would have caught the name-mismatch bug on day one. And design auth in from the start rather than bolting it on.''
   \item[``What was the hardest bug?''] \textbf{Strong:} the merged rank+draft prompt returning empty completions on the 8B model $\to$ splitting into two focused calls. ``The lesson: smaller models need narrower prompts.''
 \end{description}

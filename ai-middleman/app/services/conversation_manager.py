@@ -49,6 +49,37 @@ class ConversationManager:
             )
         return row['id']
 
+    async def tag_event_language(self, event_id: int, language: str) -> None:
+        """Record the detected language on a friend_message event, after the
+        fact — classification happens in a background task, after the event
+        was already inserted. This is what get_recent_message_language reads
+        back to keep language "sticky" across a conversation instead of
+        re-guessing from scratch on every short, ambiguous message."""
+        async with self.db_pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE thread_events SET payload = payload || jsonb_build_object('language', $2::text) WHERE id = $1",
+                event_id, language,
+            )
+
+    async def get_recent_message_language(self, thread_id: int, before_event_id: int) -> Optional[str]:
+        """Return the most recently tagged language on an earlier friend_message
+        in this thread (the conversation's established language), or None if
+        none is tagged yet — used so a short, ambiguous follow-up ("anyone
+        else") inherits the language the conversation has actually been in,
+        rather than the classifier re-guessing on a message with almost no
+        signal."""
+        async with self.db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT payload->>'language' AS language FROM thread_events
+                WHERE thread_id = $1 AND event_type = 'friend_message'
+                  AND id < $2 AND payload ? 'language'
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                thread_id, before_event_id,
+            )
+        return rows[0]["language"] if rows else None
+
     async def get_recent_events(self, thread_id: int, limit: int = 20) -> List[Dict[str, Any]]:
         """Return the most recent events for a thread, oldest first."""
         async with self.db_pool.acquire() as conn:

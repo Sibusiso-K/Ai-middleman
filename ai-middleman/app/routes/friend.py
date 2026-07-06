@@ -346,10 +346,13 @@ async def _run_matching_and_push_draft(
     emit("awaiting_approval", "📤 Sent to Alex for approval — waiting for Send/Skip")
 
 
-async def _process_sam_message(db_pool, thread_id: int, text: str):
+async def _process_sam_message(db_pool, thread_id: int, text: str, friend_event_id: int):
     """Relay Sam's message to Alex and run the intent/matching/draft pipeline.
     Runs as a background task so /friend/send returns instantly (the slow LLM
-    calls no longer block the dashboard)."""
+    calls no longer block the dashboard). friend_event_id is the already-
+    inserted friend_message event this text came from — tagged with its
+    detected language once classification runs, so later short/ambiguous
+    messages in the thread can inherit it instead of re-guessing."""
     manager = ConversationManager(db_pool)
     whatsapp = WhatsAppClient()
 
@@ -402,8 +405,21 @@ async def _process_sam_message(db_pool, thread_id: int, text: str):
         _classify(), engine.keyword_filter.filter_candidates(text)
     )
     is_request = classification["is_request"]
-    language = classification["language"]
     english_query = classification["english_query"]
+
+    # Language is "sticky": a short, ambiguous message ("anyone else", two
+    # words) carries almost no language signal, and re-guessing from scratch
+    # on it is exactly what produced replies that randomly switched language
+    # mid-conversation. For anything under 4 words, inherit whatever language
+    # this thread was most recently confirmed to be in, if any; only trust a
+    # fresh detection for messages with enough content to actually judge.
+    detected_language = classification["language"]
+    if len(text.split()) < 4:
+        sticky_language = await manager.get_recent_message_language(thread_id, friend_event_id)
+        language = sticky_language or detected_language
+    else:
+        language = detected_language
+    await manager.tag_event_language(friend_event_id, language)
 
     if not is_request:
         emit("resolved", "🙅 Not a contact request — nothing to do")
@@ -435,10 +451,10 @@ async def _queue_sam_text(db_pool, background: BackgroundTasks, text: str) -> di
     thread = await manager.get_or_create_thread(ALEX_NUMBER)
     thread_id = thread["id"]
 
-    await manager.add_event(thread_id, "friend_message", {"text": text})
+    friend_event_id = await manager.add_event(thread_id, "friend_message", {"text": text})
     slog(f"[chat] {FRIEND_NAME} -> Alex: {text}")
     emit("received", f"📩 {FRIEND_NAME} says: \"{text}\"")
-    background.add_task(_process_sam_message, db_pool, thread_id, text)
+    background.add_task(_process_sam_message, db_pool, thread_id, text, friend_event_id)
     return {"status": "queued"}
 
 
