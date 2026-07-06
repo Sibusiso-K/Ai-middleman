@@ -148,6 +148,60 @@ ORDER BY value DESC LIMIT 8;
 \end{lstlisting}
 \textbf{Interpretation.} Your ``super-connectors'' --- the people the model leans on. Useful two ways: (1) they're candidates for over-exposure (you don't want to burn one contact with every intro), and (2) a sanity check on the ranker --- if one person dominates unreasonably, the scoring may be biased.
 
+\subsection{Confidence calibration --- the one an ML engineer asks for}
+\textbf{Definition.} For each draft, the ranker's top-match \texttt{confidence} vs whether Alex ultimately \emph{Sent} it. Bucket confidence and plot the Send-rate per bucket. A rising curve means the model's confidence is \emph{calibrated} against the human's judgement.
+
+\textbf{Computation.} Resolution events (\texttt{draft\_sent}/\texttt{edited}/\texttt{skipped}) don't carry the draft's id, so each draft is paired with the first resolution that follows it and precedes the next draft --- a temporal join via a window function:
+\begin{lstlisting}[style=sql]
+WITH drafts AS (
+  SELECT te.id, te.created_at,
+    (SELECT MAX((m->>'confidence')::float)
+     FROM jsonb_array_elements(te.payload->'matches') m
+     WHERE (m->>'confidence') ~ '^[0-9.]+$') AS conf,
+    LEAD(te.created_at) OVER (ORDER BY te.created_at) AS next_at
+  FROM thread_events te
+  WHERE te.event_type='draft_suggested'
+    AND jsonb_typeof(te.payload->'matches')='array'
+),
+resolved AS (
+  SELECT d.conf,
+    (SELECT r.event_type FROM thread_events r
+     WHERE r.event_type IN ('draft_sent','draft_edited','draft_skipped')
+       AND r.created_at > d.created_at
+       AND (d.next_at IS NULL OR r.created_at < d.next_at)
+     ORDER BY r.created_at LIMIT 1) AS outcome
+  FROM drafts d WHERE d.conf IS NOT NULL
+)
+SELECT bucket(conf), COUNT(*) FILTER (WHERE outcome IS NOT NULL) AS resolved,
+       COUNT(*) FILTER (WHERE outcome='draft_sent') AS sent
+FROM resolved GROUP BY bucket(conf);   -- send_rate = sent / resolved
+\end{lstlisting}
+\textbf{Interpretation.} This is the closest thing to a calibration plot the product has. If the highest-confidence bucket has the highest Send-rate and the lowest bucket the lowest, the ranker's confidence \emph{means} something --- you can trust it as a gating signal (and even auto-send above a threshold later). If the curve is flat, the confidence is decorative. \textbf{Caveat:} on a demo-sized sample the buckets are tiny and noisy --- present the \emph{method and the direction}, not the exact heights.
+
+\subsection{Input channel mix --- typed / voice / image}
+\textbf{Definition.} How Sam's messages arrive. The media pipeline stores voice notes and images text-prefixed (a microphone emoji U+1F399 / a picture emoji U+1F5BC), so the channel is recoverable straight from the \texttt{friend\_message} payload --- no extra instrumentation.
+\begin{lstlisting}[style=sql]
+-- <MIC> and <IMG> below stand for the U+1F399 and U+1F5BC emoji prefixes
+SELECT CASE
+         WHEN payload->>'text' LIKE '<MIC>%' THEN 'Voice note'
+         WHEN payload->>'text' LIKE '<IMG>%' THEN 'Image'
+         ELSE 'Typed' END AS name,
+       COUNT(*) AS value
+FROM thread_events WHERE event_type='friend_message'
+GROUP BY name ORDER BY value DESC;
+\end{lstlisting}
+\textbf{Interpretation.} Shows multimodality is real, not a slide claim --- voice and image both flow through the \emph{same} intent/match/draft pipeline as typed text (the transcription just happens first). Voice-note share is also a proxy for how ``on the move'' users are.
+
+\subsection{Requested locations --- the geographic demand signal}
+\textbf{Definition.} The \texttt{location} of every suggested contact, tallied --- the same extraction as requested sectors, grouped on location.
+\begin{lstlisting}[style=sql]
+SELECT co.location AS name, COUNT(*) AS value
+FROM suggested s JOIN contacts co ON co.id = s.cid
+WHERE co.location IS NOT NULL AND co.location != ''
+GROUP BY co.location ORDER BY value DESC LIMIT 10;
+\end{lstlisting}
+\textbf{Interpretation.} Where demand concentrates geographically. Read against the network's location supply to spot markets where requests outrun coverage --- the same demand-vs-supply logic as sectors, on the geographic axis.
+
 \section{Network Overview (static, from \texttt{contacts})}
 
 These describe the \emph{supply} side. All are direct aggregations of the 50{,}000-row table.

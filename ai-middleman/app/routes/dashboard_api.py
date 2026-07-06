@@ -292,6 +292,101 @@ async def top_requested_contacts(request: Request, limit: int = Query(8, le=30))
     return [dict(r) for r in rows]
 
 
+@router.get("/analytics/requested-locations")
+async def requested_locations(request: Request, limit: int = Query(10, le=50)):
+    """The top locations Sam's requests pull in — the location of every
+    contact the AI suggested, tallied. The geographic demand signal."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            _SUGGESTED_CONTACTS_CTE + """
+            SELECT co.location AS name, COUNT(*) AS value
+            FROM suggested s JOIN contacts co ON co.id = s.cid
+            WHERE co.location IS NOT NULL AND co.location != ''
+            GROUP BY co.location ORDER BY value DESC LIMIT $1
+            """,
+            limit,
+        )
+    return [dict(r) for r in rows]
+
+
+@router.get("/analytics/channel-mix")
+async def channel_mix(request: Request):
+    """How Sam's messages arrive — typed, voice note, or image. Media messages
+    are stored text-prefixed (🎙️ / 🖼️) by the transcription pipeline, so the
+    channel is recoverable from the friend_message payload."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT CASE
+                WHEN payload->>'text' LIKE '🎙️%' THEN 'Voice note'
+                WHEN payload->>'text' LIKE '🖼️%' THEN 'Image'
+                ELSE 'Typed' END AS name,
+                COUNT(*) AS value
+            FROM thread_events
+            WHERE event_type = 'friend_message'
+            GROUP BY name ORDER BY value DESC
+            """
+        )
+    return [dict(r) for r in rows]
+
+
+@router.get("/analytics/confidence-calibration")
+async def confidence_calibration(request: Request):
+    """Is the ranker's confidence calibrated against Alex's decision? For each
+    draft, take the top match's confidence and whether Alex ultimately Sent it,
+    bucketed by confidence. A rising Send-rate with confidence = calibrated.
+
+    Each draft is paired with the first Send/Edit/Skip that follows it and
+    precedes the next draft — a temporal join, since resolution events don't
+    carry the draft's id."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            r"""
+            WITH drafts AS (
+                SELECT te.id, te.created_at,
+                    (SELECT MAX((m->>'confidence')::float)
+                     FROM jsonb_array_elements(te.payload->'matches') m
+                     WHERE (m->>'confidence') ~ '^[0-9.]+$') AS conf,
+                    LEAD(te.created_at) OVER (ORDER BY te.created_at) AS next_at
+                FROM thread_events te
+                WHERE te.event_type = 'draft_suggested'
+                  AND jsonb_typeof(te.payload->'matches') = 'array'
+            ),
+            resolved AS (
+                SELECT d.conf,
+                    (SELECT r.event_type FROM thread_events r
+                     WHERE r.event_type IN ('draft_sent','draft_edited','draft_skipped')
+                       AND r.created_at > d.created_at
+                       AND (d.next_at IS NULL OR r.created_at < d.next_at)
+                     ORDER BY r.created_at LIMIT 1) AS outcome
+                FROM drafts d WHERE d.conf IS NOT NULL
+            )
+            SELECT CASE
+                     WHEN conf < 0.6 THEN '<0.6'
+                     WHEN conf < 0.7 THEN '0.6-0.7'
+                     WHEN conf < 0.8 THEN '0.7-0.8'
+                     WHEN conf < 0.9 THEN '0.8-0.9'
+                     ELSE '0.9-1.0' END AS bucket,
+                   COUNT(*) FILTER (WHERE outcome IS NOT NULL) AS resolved,
+                   COUNT(*) FILTER (WHERE outcome = 'draft_sent') AS sent
+            FROM resolved GROUP BY bucket ORDER BY bucket
+            """
+        )
+    out = []
+    for r in rows:
+        resolved = r["resolved"] or 0
+        out.append({
+            "bucket": r["bucket"],
+            "resolved": resolved,
+            "sent": r["sent"] or 0,
+            "send_rate": round((r["sent"] or 0) / resolved, 3) if resolved else 0.0,
+        })
+    return out
+
+
 @router.get("/filters/options")
 async def filter_options(request: Request):
     """Return the distinct sector/location/seniority values for the Contacts page filters."""

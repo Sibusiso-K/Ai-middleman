@@ -47,6 +47,8 @@ export type ConversationSummary = {
 export type FunnelSlice = { name: string; value: number };
 export type RequestedStat = { name: string; value: number };
 export type RequestedContact = { name: string; title: string | null; company: string | null; value: number };
+export type ChannelSlice = { name: string; value: number };
+export type CalibrationBucket = { bucket: string; resolved: number; sent: number; send_rate: number };
 
 export type ContactRow = {
   id: number;
@@ -119,6 +121,9 @@ export const api = {
   requestedSectors: () => request<RequestedStat[]>("/api/analytics/requested-sectors"),
   requestedServices: () => request<RequestedStat[]>("/api/analytics/requested-services"),
   topRequestedContacts: () => request<RequestedContact[]>("/api/analytics/top-requested-contacts"),
+  requestedLocations: () => request<RequestedStat[]>("/api/analytics/requested-locations"),
+  channelMix: () => request<ChannelSlice[]>("/api/analytics/channel-mix"),
+  confidenceCalibration: () => request<CalibrationBucket[]>("/api/analytics/confidence-calibration"),
   filterOptions: () => request<FilterOptions>("/api/filters/options"),
   activity: (limit = 10) => request<ActivityEvent[]>(`/api/activity?limit=${limit}`),
   contacts: (params: {

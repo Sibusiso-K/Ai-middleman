@@ -66,6 +66,9 @@ function AnalyticsPage() {
   const reqSectors = useQuery({ queryKey: ["analytics", "req-sectors"], queryFn: api.requestedSectors });
   const reqServices = useQuery({ queryKey: ["analytics", "req-services"], queryFn: api.requestedServices });
   const topContacts = useQuery({ queryKey: ["analytics", "top-requested"], queryFn: api.topRequestedContacts });
+  const reqLocations = useQuery({ queryKey: ["analytics", "req-locations"], queryFn: api.requestedLocations });
+  const channelMix = useQuery({ queryKey: ["analytics", "channel-mix"], queryFn: api.channelMix });
+  const calibration = useQuery({ queryKey: ["analytics", "calibration"], queryFn: api.confidenceCalibration });
 
   // Static — from the contacts table
   const summary = useQuery({ queryKey: ["analytics", "summary"], queryFn: api.analyticsSummary });
@@ -86,6 +89,11 @@ function AnalyticsPage() {
   const FUNNEL_COLORS: Record<string, string> = {
     Sent: "var(--color-success)", Edited: "var(--color-warning)", Skipped: "var(--color-destructive)", Pending: "var(--color-muted)",
   };
+  const CHANNEL_COLORS: Record<string, string> = {
+    Typed: "var(--color-primary)", "Voice note": "var(--color-warning)", Image: "oklch(0.68 0.14 200)",
+  };
+  const channelData = channelMix.data ?? [];
+  const calibData = (calibration.data ?? []).map((b) => ({ name: b.bucket, rate: Math.round(b.send_rate * 100), n: b.resolved }));
   const funnelData = funnel.data ?? [];
   const c = convo.data;
   const s = summary.data;
@@ -183,6 +191,67 @@ function AnalyticsPage() {
               ))}
             </ul>
           </Card>
+        </div>
+
+        <div className="grid gap-6 lg:grid-cols-2">
+          <Card className="p-5">
+            <SectionHeader title="Confidence Calibration" subtitle="Send rate by the ranker's confidence — rising = well-calibrated" />
+            <div className="h-64">
+              <ResponsiveContainer>
+                <BarChart data={calibData} margin={{ left: 0, right: 10, top: 10 }}>
+                  <CartesianGrid stroke="var(--color-border)" vertical={false} />
+                  <XAxis dataKey="name" tick={axisTick} axisLine={false} tickLine={false} />
+                  <YAxis domain={[0, 100]} unit="%" tick={axisTick} axisLine={false} tickLine={false} />
+                  <Tooltip contentStyle={tooltipStyle} formatter={(v: number, _n, p) => [`${v}% sent (n=${p?.payload?.n ?? 0})`, "Send rate"]} />
+                  <Bar dataKey="rate" fill="var(--color-primary)" radius={[8, 8, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <p className="text-xs text-muted-foreground mt-2">Small sample — read the trend, not the exact bars.</p>
+          </Card>
+
+          <Card className="p-5">
+            <SectionHeader title="Most-Requested Locations" subtitle="Where requests point — location of every suggested contact" />
+            <div className="h-64">
+              <ResponsiveContainer>
+                <BarChart data={reqLocations.data ?? []} layout="vertical" margin={{ left: 10, right: 20, top: 4 }}>
+                  <CartesianGrid horizontal={false} stroke="var(--color-border)" />
+                  <XAxis type="number" tick={axisTick} axisLine={false} tickLine={false} />
+                  <YAxis type="category" dataKey="name" width={120} tick={axisTick} axisLine={false} tickLine={false} />
+                  <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => [v, "Times suggested"]} />
+                  <Bar dataKey="value" fill="var(--color-primary-soft)" radius={[0, 6, 6, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>
+        </div>
+
+        <div className="grid gap-6 lg:grid-cols-2">
+          <Card className="p-5">
+            <SectionHeader title="How Requests Arrive" subtitle="Typed vs voice note vs image — the input channel mix" />
+            <div className="flex items-center gap-4">
+              <div className="w-40 h-40 shrink-0">
+                <ResponsiveContainer>
+                  <PieChart>
+                    <Pie data={channelData} innerRadius={44} outerRadius={72} paddingAngle={2} dataKey="value" stroke="none">
+                      {channelData.map((ch) => <Cell key={ch.name} fill={CHANNEL_COLORS[ch.name] ?? "var(--color-muted)"} />)}
+                    </Pie>
+                    <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => [v, "Messages"]} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <ul className="flex-1 min-w-0 space-y-2 text-sm">
+                {channelData.map((ch) => (
+                  <li key={ch.name} className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: CHANNEL_COLORS[ch.name] ?? "var(--color-muted)" }} />
+                    <span className="flex-1 truncate">{ch.name}</span>
+                    <span className="text-muted-foreground tabular-nums">{ch.value}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </Card>
+          <div />
         </div>
       </section>
 
