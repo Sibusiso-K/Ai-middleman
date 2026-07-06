@@ -1,7 +1,7 @@
 """
 run_eval.py — Labeled evaluation harness for the AI Middleman pipeline.
 
-Runs three independent checks against tests/eval_set.json:
+Runs four independent checks against tests/eval_set.json:
   1. Intent classification accuracy/precision/recall (direct, no side effects —
      calls IntentClassifier in-process, never touches WhatsApp).
   2. Matching relevance (calls the local API's POST /match, which also has no
@@ -9,6 +9,9 @@ Runs three independent checks against tests/eval_set.json:
   3. Follow-up selection (pure function, no LLM/API/quota) — checks that
      _resolve_selected_contacts picks the right people from the last draft's
      suggestions given a natural follow-up.
+  4. Language guard (pure function, no LLM/API/quota) — checks that
+     _looks_nguni_not_afrikaans catches real isiZulu without false-positiving
+     on real Afrikaans or English.
 
 Requires the local API to be running on localhost:8000 (for the matching
 half only — intent classification and follow-up selection don't need it).
@@ -28,7 +31,11 @@ import httpx
 sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
-from app.services.intent_classifier import IntentClassifier, IntentClassificationError
+from app.services.intent_classifier import (
+    IntentClassifier,
+    IntentClassificationError,
+    _looks_nguni_not_afrikaans,
+)
 from app.routes.friend import _resolve_selected_contacts
 
 EVAL_SET_PATH = Path(__file__).parent.parent / "tests" / "eval_set.json"
@@ -176,7 +183,30 @@ def run_followup_eval(section: dict) -> dict:
     return {"rows": rows, "passed": passed, "total": total}
 
 
-def write_report(intent_result: dict, matching_result: dict, followup_result: dict):
+def run_language_guard_eval(cases: list) -> dict:
+    print()
+    print("=" * 70)
+    print("LANGUAGE GUARD (no LLM/API — pure Nguni-marker check)")
+    print("=" * 70)
+
+    passed = 0
+    rows = []
+    for case in cases:
+        text, expected = case["text"], case["expected"]
+        got = _looks_nguni_not_afrikaans(text)
+        ok = got == expected
+        passed += ok
+        mark = "PASS" if ok else "FAIL"
+        rows.append((text, expected, got, mark))
+        print(f"  [{mark}] expected={expected!s:<5} got={got!s:<5} — {text!r}")
+
+    total = len(cases)
+    print()
+    print(f"  Guard accuracy: {passed}/{total} ({passed/total:.1%})")
+    return {"rows": rows, "passed": passed, "total": total}
+
+
+def write_report(intent_result: dict, matching_result: dict, followup_result: dict, language_guard_result: dict):
     lines = ["# AI Middleman — Evaluation Report", ""]
     lines.append("## Intent classification")
     lines.append(f"- Accuracy: {intent_result['accuracy']:.1%}")
@@ -205,6 +235,14 @@ def write_report(intent_result: dict, matching_result: dict, followup_result: di
     lines.append("|---|---|---|---|")
     for text, expected, got, mark in followup_result["rows"]:
         lines.append(f"| {text} | {expected or '(none)'} | {got or '(none)'} | {mark} |")
+    lines.append("")
+    lines.append("## Language guard")
+    lines.append(f"- Guard accuracy: {language_guard_result['passed']}/{language_guard_result['total']} ({language_guard_result['passed']/language_guard_result['total']:.1%})")
+    lines.append("")
+    lines.append("| Message | Expected (is Nguni) | Got | Result |")
+    lines.append("|---|---|---|---|")
+    for text, expected, got, mark in language_guard_result["rows"]:
+        lines.append(f"| {text} | {expected} | {got} | {mark} |")
     REPORT_PATH.write_text("\n".join(lines), encoding="utf-8")
 
 
@@ -214,8 +252,9 @@ async def main():
     intent_result = await run_intent_eval(eval_set["intent"])
     matching_result = await run_matching_eval(eval_set["matching"])
     followup_result = run_followup_eval(eval_set["followup"])
+    language_guard_result = run_language_guard_eval(eval_set["language_guard"]["cases"])
 
-    write_report(intent_result, matching_result, followup_result)
+    write_report(intent_result, matching_result, followup_result, language_guard_result)
     print()
     print(f"Full report written to {REPORT_PATH}")
 

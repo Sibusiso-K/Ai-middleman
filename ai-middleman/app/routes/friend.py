@@ -100,35 +100,44 @@ def _join_names(names: list) -> str:
     return f"{', '.join(names[:-1])} and {names[-1]}"
 
 
+_GROUP_PRONOUN_RE = re.compile(
+    r"\b(both|all three|them all|everyone|all of (them|those|em)|them|dem|em|those|these)\b",
+    re.IGNORECASE,
+)
+
+
 def _resolve_selected_contacts(text: str, matches: list) -> list:
     """Given Sam's follow-up and the 1-3 previously-suggested matches, return
     the subset Sam is picking — by name ("connect me with John and Sally"), by
-    position ("the second one"), or all ("both of them"). Returns [] if the
-    message doesn't clearly point at a suggested contact, or reads as a
-    rejection rather than a pick."""
+    position ("the second one"), or all ("both of them" / "them" / "em",
+    misspelled connecting verb and all — "acount with them" resolves the same
+    as "connect me with them"). Returns [] if the message doesn't clearly
+    point at a suggested contact, or reads as a rejection rather than a pick."""
     if not matches:
         return []
     if _NEGATIVE_CUE_RE.search(text):
         return []
 
     low = f" {text.lower()} "
+    is_question = text.rstrip().endswith("?")
 
-    # Self-sufficient group selections — "both of them", "all three", "all of
-    # them", "them all", "everyone" can only mean "all the people you
-    # suggested", so they don't need a separate connect/send verb.
-    if re.search(r"\b(both|all of (them|those)|all three|them all|everyone)\b", low):
+    # A bare group pronoun ("them"/"dem"/"em"/"those"/"these") or an explicit
+    # group phrase ("both of them", "all three") is self-sufficient — it does
+    # NOT need a correctly-spelled connect/send verb next to it, since typos
+    # on that verb ("acount with them") are exactly what this needs to
+    # tolerate. The only thing that still gates it is: a genuine QUESTION
+    # ("what about them?", "are they any good?") isn't a pick, so if the
+    # message ends in "?" it still needs a positive cue to count as one.
+    if _GROUP_PRONOUN_RE.search(low):
+        if is_question and not _POSITIVE_CUE_RE.search(text):
+            return []
         return list(matches)
 
-    # Everything below (a bare pronoun, a position, or a name) can also appear
-    # in a question ("what about the second one?", "are they any good?"), so it
-    # only counts as a pick when there's a positive cue and no rejection.
+    # Everything below (a position or a name) can also appear in a question
+    # ("what about the second one?"), so it only counts as a pick when there's
+    # a positive cue and no rejection.
     if not _POSITIVE_CUE_RE.search(text):
         return []
-
-    # "connect me with them / dem / those" -> everyone suggested. Safe here
-    # because the positive cue above rules out the bare-question case.
-    if re.search(r"\b(them|dem|those|these)\b", low):
-        return list(matches)
 
     selected, seen = [], set()
 

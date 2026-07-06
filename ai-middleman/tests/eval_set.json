@@ -58,7 +58,25 @@
       {"text": "John is too junior, anyone else?", "expected": []},
       {"text": "what does David do again?", "expected": []},
       {"text": "actually I need a lawyer in Dubai instead", "expected": []},
-      {"text": "yeah", "expected": []}
+      {"text": "yeah", "expected": []},
+      {"text": "acount with them", "expected": ["John Hall", "Sally Meyer", "David Cohen"]},
+      {"text": "connect me with all of em", "expected": ["John Hall", "Sally Meyer", "David Cohen"]},
+      {"text": "okay acount with them please", "expected": ["John Hall", "Sally Meyer", "David Cohen"]},
+      {"text": "are they any good?", "expected": []}
+    ]
+  },
+
+  "language_guard": {
+    "_note": "Deterministic (no LLM/API) check of _looks_nguni_not_afrikaans: real isiZulu must be flagged as NOT Afrikaans (so the classifier's occasional 'Afrikaans' guess for genuine Zulu text gets overridden to English), while real Afrikaans and English must NOT be flagged.",
+    "cases": [
+      {"text": "Ngifuna ummuntu kwiEnergy sector", "expected": true, "_note": "real isiZulu, seen live drafted in Afrikaans before this guard existed"},
+      {"text": "Ngidinga ummeli waseLondon wamashishini", "expected": true, "_note": "real isiZulu"},
+      {"text": "Sawubona Sam", "expected": true, "_note": "real isiZulu greeting"},
+      {"text": "ek soek William williams", "expected": false, "_note": "real Afrikaans - must NOT trigger the guard"},
+      {"text": "Ken jy iemand wat n korporatiewe prokureur is in Londen?", "expected": false, "_note": "real Afrikaans"},
+      {"text": "Any solid corporate lawyers you know in Frankfurt?", "expected": false},
+      {"text": "This is amazing, thank you", "expected": false, "_note": "guards against false-positiving on English words like amazing/abandon"},
+      {"text": "connect me with all of them", "expected": false}
     ]
   }
 }

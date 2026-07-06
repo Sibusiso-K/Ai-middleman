@@ -16,6 +16,7 @@ Afrikaans messages too.
 import asyncio
 import httpx
 import os
+import re
 from dotenv import load_dotenv
 from pathlib import Path
 
@@ -25,6 +26,24 @@ from app.services.sa_languages import SA_LANGUAGES
 from app.log_safe import slog
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
+
+# Deterministic backstop, not just a prompt instruction: seen live, the model
+# sometimes force-fit genuine isiZulu into the "Afrikaans" bucket, since both
+# just read as "not English" to it — e.g. "Ngifuna ummuntu kwiEnergy sector"
+# (real isiZulu) came back drafted in Afrikaans. These are common isiZulu/
+# Nguni words and noun-class prefixes that never appear in Afrikaans; if any
+# show up, the message is NOT Afrikaans regardless of what the model said,
+# so fall back to English rather than draft in the wrong language.
+_NGUNI_MARKERS_RE = re.compile(
+    r"\b(ngifuna|ngicela|ngidinga|sawubona|yebo|ngiyabonga|unjani|kanjani|"
+    r"umuntu|abantu|umsebenzi|ngiyakuthanda|nginesiqiniseko)\b"
+    r"|\b(kwi|ngi|ngu|izi|ubu|uku)[a-z]{2,}",
+    re.IGNORECASE,
+)
+
+
+def _looks_nguni_not_afrikaans(text: str) -> bool:
+    return bool(_NGUNI_MARKERS_RE.search(text))
 
 
 class IntentClassificationError(Exception):
@@ -132,6 +151,14 @@ Reply with ONLY this exact JSON shape, nothing else — no markdown, no explanat
                                 # the supported set — default to English rather than risk
                                 # drafting in a language nobody asked for.
                                 slog(f"[Intent] model returned unsupported language {detected_language!r} — defaulting to English")
+                                detected_language = "English"
+                            elif detected_language == "Afrikaans" and _looks_nguni_not_afrikaans(message):
+                                # Seen live: the model force-fits genuine isiZulu into
+                                # "Afrikaans" since both just read as "not English" to it.
+                                # This deterministic word/prefix check overrides that —
+                                # never draft in Afrikaans for a message that's actually
+                                # isiZulu (or another Nguni language we don't support).
+                                slog(f"[Intent] model said Afrikaans but text looks Nguni, not Afrikaans — defaulting to English: {message[:60]!r}")
                                 detected_language = "English"
                             result = {
                                 "is_request": bool(data.get("is_request")),
