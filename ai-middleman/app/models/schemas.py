@@ -41,3 +41,27 @@ class AgentResponse(BaseModel):
     matches: List[MatchDetail]
     match_quality: Literal["good", "weak", "none"]
     clarification_question: Optional[str] = None
+
+
+class ContactWrite(BaseModel):
+    """Editable fields for manually adding/updating a contact from the
+    dashboard. Excludes system-managed columns (id, contact_id, created_at/
+    updated_at, and the intros_made/deals_closed counters the app itself
+    increments)."""
+    full_name: str
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    company: Optional[str] = None
+    title: Optional[str] = None
+    sector: Optional[str] = None
+    specialty: Optional[str] = None
+    location: Optional[str] = None
+    seniority: Optional[str] = None
+    expertise_tags: Optional[str] = None
+    can_help_with: Optional[str] = None
+    looking_for: Optional[str] = None
+    relationship_strength: Optional[int] = Field(default=None, ge=1, le=5)
+    how_alex_knows_them: Optional[str] = None
+    is_vip: bool = False
+    preferred_contact_channel: Optional[str] = None
+    comment: Optional[str] = None

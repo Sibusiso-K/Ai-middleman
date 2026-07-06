@@ -9,17 +9,11 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as MatchingRouteImport } from './routes/matching'
 import { Route as InboxRouteImport } from './routes/inbox'
 import { Route as ContactsRouteImport } from './routes/contacts'
 import { Route as AnalyticsRouteImport } from './routes/analytics'
 import { Route as IndexRouteImport } from './routes/index'
 
-const MatchingRoute = MatchingRouteImport.update({
-  id: '/matching',
-  path: '/matching',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const InboxRoute = InboxRouteImport.update({
   id: '/inbox',
   path: '/inbox',
@@ -46,14 +40,12 @@ export interface FileRoutesByFullPath {
   '/analytics': typeof AnalyticsRoute
   '/contacts': typeof ContactsRoute
   '/inbox': typeof InboxRoute
-  '/matching': typeof MatchingRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/analytics': typeof AnalyticsRoute
   '/contacts': typeof ContactsRoute
   '/inbox': typeof InboxRoute
-  '/matching': typeof MatchingRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -61,14 +53,13 @@ export interface FileRoutesById {
   '/analytics': typeof AnalyticsRoute
   '/contacts': typeof ContactsRoute
   '/inbox': typeof InboxRoute
-  '/matching': typeof MatchingRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/analytics' | '/contacts' | '/inbox' | '/matching'
+  fullPaths: '/' | '/analytics' | '/contacts' | '/inbox'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/analytics' | '/contacts' | '/inbox' | '/matching'
-  id: '__root__' | '/' | '/analytics' | '/contacts' | '/inbox' | '/matching'
+  to: '/' | '/analytics' | '/contacts' | '/inbox'
+  id: '__root__' | '/' | '/analytics' | '/contacts' | '/inbox'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -76,18 +67,10 @@ export interface RootRouteChildren {
   AnalyticsRoute: typeof AnalyticsRoute
   ContactsRoute: typeof ContactsRoute
   InboxRoute: typeof InboxRoute
-  MatchingRoute: typeof MatchingRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/matching': {
-      id: '/matching'
-      path: '/matching'
-      fullPath: '/matching'
-      preLoaderRoute: typeof MatchingRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/inbox': {
       id: '/inbox'
       path: '/inbox'
@@ -124,7 +107,6 @@ const rootRouteChildren: RootRouteChildren = {
   AnalyticsRoute: AnalyticsRoute,
   ContactsRoute: ContactsRoute,
   InboxRoute: InboxRoute,
-  MatchingRoute: MatchingRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

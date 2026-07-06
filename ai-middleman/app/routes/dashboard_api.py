@@ -1,36 +1,21 @@
 """
-dashboard_api.py — read-only JSON endpoints backing the React dashboard
+dashboard_api.py — JSON endpoints backing the React dashboard
 (ai-middleman/frontend).
 
-All /api/* routes here run analytics/browse queries against the `contacts`
+Most /api/* routes here run analytics/browse queries against the `contacts`
 table plus a recent-activity feed off `thread_events`, exposed as JSON for the
-web frontend's Home, Contacts, and Analytics pages.
+web frontend's Home, Contacts, and Analytics pages. The /contacts routes also
+include manual create/update/delete, so Alex can maintain the network
+directly from the dashboard rather than only via the seed data.
 """
 
 import json
-from fastapi import APIRouter, Request, Query
+from fastapi import APIRouter, Request, Query, HTTPException
 from typing import Optional
 
+from app.models.schemas import ContactWrite
+
 router = APIRouter(prefix="/api")
-
-
-@router.get("/analytics/summary")
-async def analytics_summary(request: Request):
-    """Return headline KPIs: total contacts, VIP count, avg relationship strength, sector count."""
-    pool = request.app.state.db_pool
-    async with pool.acquire() as conn:
-        total = await conn.fetchval("SELECT COUNT(*) FROM contacts")
-        vip = await conn.fetchval("SELECT COUNT(*) FROM contacts WHERE is_vip = TRUE")
-        avg_rel = await conn.fetchval("SELECT ROUND(AVG(relationship_strength)::numeric, 1) FROM contacts")
-        sectors = await conn.fetchval(
-            "SELECT COUNT(DISTINCT sector) FROM contacts WHERE sector IS NOT NULL AND sector != ''"
-        )
-    return {
-        "total_contacts": total,
-        "vip_contacts": vip,
-        "avg_relationship_strength": float(avg_rel) if avg_rel is not None else 0,
-        "sectors_covered": sectors,
-    }
 
 
 @router.get("/analytics/sectors")
@@ -67,108 +52,6 @@ async def analytics_locations(request: Request, limit: int = Query(10, le=50)):
             limit,
         )
     return [dict(r) for r in rows]
-
-
-@router.get("/analytics/scatter")
-async def analytics_scatter(request: Request, limit: int = Query(500, le=2000)):
-    """Return a random sample of (relationship_strength, intros_made, sector) points for the scatter plot."""
-    pool = request.app.state.db_pool
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT relationship_strength AS x, intros_made AS y, sector
-            FROM contacts
-            WHERE relationship_strength IS NOT NULL AND intros_made IS NOT NULL
-                AND sector IS NOT NULL AND sector != ''
-            ORDER BY random()
-            LIMIT $1
-            """,
-            limit,
-        )
-    return [dict(r) for r in rows]
-
-
-@router.get("/analytics/deals-by-sector")
-async def analytics_deals_by_sector(request: Request):
-    """Return average deals-closed per sector, descending."""
-    pool = request.app.state.db_pool
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT sector AS name, ROUND(AVG(deals_closed)::numeric, 1) AS value
-            FROM contacts
-            WHERE sector IS NOT NULL AND sector != '' AND deals_closed IS NOT NULL
-            GROUP BY sector
-            ORDER BY value DESC
-            """
-        )
-    return [{"name": r["name"], "value": float(r["value"])} for r in rows]
-
-
-@router.get("/analytics/top-skills")
-async def analytics_top_skills(request: Request, limit: int = Query(8, le=30)):
-    """Return the top `limit` specialties by contact count."""
-    pool = request.app.state.db_pool
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT specialty AS name, COUNT(*) AS count
-            FROM contacts
-            WHERE specialty IS NOT NULL AND specialty != ''
-            GROUP BY specialty
-            ORDER BY count DESC
-            LIMIT $1
-            """,
-            limit,
-        )
-    return [dict(r) for r in rows]
-
-
-@router.get("/analytics/seniority")
-async def analytics_seniority(request: Request):
-    """Return contact counts grouped by seniority level, most common first."""
-    pool = request.app.state.db_pool
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT seniority AS name, COUNT(*) AS value
-            FROM contacts
-            WHERE seniority IS NOT NULL AND seniority != ''
-            GROUP BY seniority
-            ORDER BY value DESC
-            """
-        )
-    return [dict(r) for r in rows]
-
-
-@router.get("/analytics/strength-distribution")
-async def analytics_strength_distribution(request: Request):
-    """Return the count of contacts at each relationship-strength level (1-5)."""
-    pool = request.app.state.db_pool
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT relationship_strength AS level, COUNT(*) AS value
-            FROM contacts
-            WHERE relationship_strength IS NOT NULL
-            GROUP BY relationship_strength
-            ORDER BY relationship_strength
-            """
-        )
-    return [{"level": r["level"], "value": r["value"]} for r in rows]
-
-
-@router.get("/analytics/vip-breakdown")
-async def analytics_vip_breakdown(request: Request):
-    """Return the VIP vs standard contact split for a donut chart."""
-    pool = request.app.state.db_pool
-    async with pool.acquire() as conn:
-        vip = await conn.fetchval("SELECT COUNT(*) FROM contacts WHERE is_vip = TRUE")
-        standard = await conn.fetchval("SELECT COUNT(*) FROM contacts WHERE is_vip = FALSE OR is_vip IS NULL")
-    return [
-        {"name": "VIP", "value": vip},
-        {"name": "Standard", "value": standard},
-    ]
 
 
 # --- Conversation analytics: computed from the live thread_events log, not the
@@ -290,6 +173,34 @@ async def top_requested_contacts(request: Request, limit: int = Query(8, le=30))
             limit,
         )
     return [dict(r) for r in rows]
+
+
+@router.get("/analytics/underused-vips")
+async def underused_vips(request: Request, limit: int = Query(5, le=20)):
+    """VIP contacts the AI has never once suggested — Alex's highest-value
+    relationships sitting unused. Helps Alex spot who in his own network to
+    proactively reach out to, not just who requests are already surfacing."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        total = await conn.fetchval(
+            _SUGGESTED_CONTACTS_CTE + """
+            SELECT COUNT(*) FROM contacts co
+            WHERE co.is_vip = TRUE
+              AND NOT EXISTS (SELECT 1 FROM suggested s WHERE s.cid = co.id)
+            """
+        )
+        rows = await conn.fetch(
+            _SUGGESTED_CONTACTS_CTE + """
+            SELECT co.full_name AS name, co.title, co.company, co.relationship_strength
+            FROM contacts co
+            WHERE co.is_vip = TRUE
+              AND NOT EXISTS (SELECT 1 FROM suggested s WHERE s.cid = co.id)
+            ORDER BY co.relationship_strength DESC NULLS LAST
+            LIMIT $1
+            """,
+            limit,
+        )
+    return {"total": total, "contacts": [dict(r) for r in rows]}
 
 
 @router.get("/analytics/requested-locations")
@@ -486,6 +397,69 @@ async def get_contact(request: Request, contact_id: int):
             contact_id,
         )
     return {"contact": dict(contact), "recent_matches": [dict(r) for r in history]}
+
+
+@router.post("/contacts")
+async def create_contact(request: Request, body: ContactWrite):
+    """Manually add a contact to the network from the dashboard."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO contacts (
+                full_name, phone, email, company, title, sector, specialty,
+                location, seniority, expertise_tags, can_help_with, looking_for,
+                relationship_strength, how_alex_knows_them, is_vip,
+                preferred_contact_channel, comment
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+            RETURNING *
+            """,
+            body.full_name, body.phone, body.email, body.company, body.title,
+            body.sector, body.specialty, body.location, body.seniority,
+            body.expertise_tags, body.can_help_with, body.looking_for,
+            body.relationship_strength, body.how_alex_knows_them, body.is_vip,
+            body.preferred_contact_channel, body.comment,
+        )
+    return dict(row)
+
+
+@router.put("/contacts/{contact_id}")
+async def update_contact(request: Request, contact_id: int, body: ContactWrite):
+    """Update an existing contact's editable fields."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE contacts SET
+                full_name=$1, phone=$2, email=$3, company=$4, title=$5,
+                sector=$6, specialty=$7, location=$8, seniority=$9,
+                expertise_tags=$10, can_help_with=$11, looking_for=$12,
+                relationship_strength=$13, how_alex_knows_them=$14, is_vip=$15,
+                preferred_contact_channel=$16, comment=$17,
+                updated_at=CURRENT_TIMESTAMP
+            WHERE id=$18
+            RETURNING *
+            """,
+            body.full_name, body.phone, body.email, body.company, body.title,
+            body.sector, body.specialty, body.location, body.seniority,
+            body.expertise_tags, body.can_help_with, body.looking_for,
+            body.relationship_strength, body.how_alex_knows_them, body.is_vip,
+            body.preferred_contact_channel, body.comment, contact_id,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    return dict(row)
+
+
+@router.delete("/contacts/{contact_id}")
+async def delete_contact(request: Request, contact_id: int):
+    """Remove a contact from the network."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        deleted_id = await conn.fetchval("DELETE FROM contacts WHERE id=$1 RETURNING id", contact_id)
+    if deleted_id is None:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    return {"deleted": deleted_id}
 
 
 @router.get("/activity")

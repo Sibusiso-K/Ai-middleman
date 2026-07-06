@@ -2,7 +2,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Home, Inbox, Sparkles, Users, BarChart3, ChevronsLeft, ChevronsRight, Handshake,
+  Home, Inbox, Users, BarChart3, ChevronsLeft, ChevronsRight, Handshake,
 } from "lucide-react";
 import { useTheme, type Theme } from "@/lib/theme";
 import { api } from "@/lib/api";
@@ -10,7 +10,6 @@ import { api } from "@/lib/api";
 const NAV = [
   { to: "/", label: "Home", icon: Home, exact: true },
   { to: "/inbox", label: "Inbox", icon: Inbox },
-  { to: "/matching", label: "Matching", icon: Sparkles },
   { to: "/contacts", label: "Contacts", icon: Users },
   { to: "/analytics", label: "Analytics", icon: BarChart3 },
 ];

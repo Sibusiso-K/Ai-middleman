@@ -11,30 +11,21 @@ async function request<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-async function post<T>(path: string, body: unknown): Promise<T> {
+async function send<T>(method: "POST" | "PUT" | "DELETE", path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
-    method: "POST",
+    method,
     headers: { "Content-Type": "application/json", ...NGROK_BYPASS_HEADERS },
-    body: JSON.stringify(body),
+    body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) throw new Error(`${path} -> ${res.status}`);
   return res.json() as Promise<T>;
 }
-
-export type AnalyticsSummary = {
-  total_contacts: number;
-  vip_contacts: number;
-  avg_relationship_strength: number;
-  sectors_covered: number;
-};
+const post = <T,>(path: string, body: unknown) => send<T>("POST", path, body);
+const put = <T,>(path: string, body: unknown) => send<T>("PUT", path, body);
+const del = <T,>(path: string) => send<T>("DELETE", path);
 
 export type SectorStat = { name: string; value: number };
 export type LocationStat = { name: string; value: number };
-export type ScatterPoint = { x: number; y: number; sector: string };
-export type SkillStat = { name: string; count: number };
-export type SeniorityStat = { name: string; value: number };
-export type StrengthBucket = { level: number; value: number };
-export type VipSlice = { name: string; value: number };
 export type ConversationSummary = {
   messages_from_sam: number;
   drafts_generated: number;
@@ -49,6 +40,8 @@ export type RequestedStat = { name: string; value: number };
 export type RequestedContact = { name: string; title: string | null; company: string | null; value: number };
 export type ChannelSlice = { name: string; value: number };
 export type CalibrationBucket = { bucket: string; resolved: number; sent: number; send_rate: number };
+export type UnderusedVip = { name: string; title: string | null; company: string | null; relationship_strength: number | null };
+export type UnderusedVips = { total: number; contacts: UnderusedVip[] };
 
 export type ContactRow = {
   id: number;
@@ -70,8 +63,31 @@ export type ContactsPage = {
   page_size: number;
 };
 
+export type ContactFull = {
+  id: number;
+  full_name: string;
+  phone: string | null;
+  email: string | null;
+  company: string | null;
+  title: string | null;
+  sector: string | null;
+  specialty: string | null;
+  location: string | null;
+  seniority: string | null;
+  expertise_tags: string | null;
+  can_help_with: string | null;
+  looking_for: string | null;
+  relationship_strength: number | null;
+  how_alex_knows_them: string | null;
+  is_vip: boolean;
+  preferred_contact_channel: string | null;
+  comment: string | null;
+};
+
+export type ContactWrite = Omit<ContactFull, "id">;
+
 export type ContactDetail = {
-  contact: Record<string, unknown>;
+  contact: ContactFull;
   recent_matches: { confidence: number; reasoning: string; created_at: string; message_text: string }[];
 };
 
@@ -107,15 +123,8 @@ export type PipelineEvent = {
 };
 
 export const api = {
-  analyticsSummary: () => request<AnalyticsSummary>("/api/analytics/summary"),
   analyticsSectors: () => request<SectorStat[]>("/api/analytics/sectors"),
   analyticsLocations: (limit = 10) => request<LocationStat[]>(`/api/analytics/locations?limit=${limit}`),
-  analyticsScatter: (limit = 500) => request<ScatterPoint[]>(`/api/analytics/scatter?limit=${limit}`),
-  analyticsDealsBySector: () => request<SectorStat[]>("/api/analytics/deals-by-sector"),
-  analyticsTopSkills: (limit = 8) => request<SkillStat[]>(`/api/analytics/top-skills?limit=${limit}`),
-  analyticsSeniority: () => request<SeniorityStat[]>("/api/analytics/seniority"),
-  analyticsStrengthDistribution: () => request<StrengthBucket[]>("/api/analytics/strength-distribution"),
-  analyticsVipBreakdown: () => request<VipSlice[]>("/api/analytics/vip-breakdown"),
   conversationSummary: () => request<ConversationSummary>("/api/analytics/conversation-summary"),
   approvalFunnel: () => request<FunnelSlice[]>("/api/analytics/approval-funnel"),
   requestedSectors: () => request<RequestedStat[]>("/api/analytics/requested-sectors"),
@@ -124,6 +133,7 @@ export const api = {
   requestedLocations: () => request<RequestedStat[]>("/api/analytics/requested-locations"),
   channelMix: () => request<ChannelSlice[]>("/api/analytics/channel-mix"),
   confidenceCalibration: () => request<CalibrationBucket[]>("/api/analytics/confidence-calibration"),
+  underusedVips: () => request<UnderusedVips>("/api/analytics/underused-vips"),
   filterOptions: () => request<FilterOptions>("/api/filters/options"),
   activity: (limit = 10) => request<ActivityEvent[]>(`/api/activity?limit=${limit}`),
   contacts: (params: {
@@ -141,6 +151,9 @@ export const api = {
     return request<ContactsPage>(`/api/contacts?${q.toString()}`);
   },
   contact: (id: number) => request<ContactDetail>(`/api/contacts/${id}`),
+  createContact: (body: ContactWrite) => post<ContactFull>("/api/contacts", body),
+  updateContact: (id: number, body: ContactWrite) => put<ContactFull>(`/api/contacts/${id}`, body),
+  deleteContact: (id: number) => del<{ deleted: number }>(`/api/contacts/${id}`),
   match: (query: string) => post<MatchResult>("/match", { query }),
   friendThread: () => request<{ thread_id: number; events: ThreadEvent[] }>("/friend/thread"),
   friendSend: (text: string) => post<{ status: string } | { error: string }>("/friend/send", { text }),
