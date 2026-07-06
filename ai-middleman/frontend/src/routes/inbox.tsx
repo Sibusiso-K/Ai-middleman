@@ -38,6 +38,10 @@ function InboxPage() {
     queryKey: ["friend-thread"],
     queryFn: api.friendThread,
     refetchInterval: 2000,
+    // Keep polling even when the tab isn't focused — otherwise Alex's reply,
+    // which arrives while you're looking at his WhatsApp on another screen,
+    // wouldn't appear on Sam's side until you clicked back or refreshed.
+    refetchIntervalInBackground: true,
     retry: 2,
   });
   const sendMutation = useMutation({

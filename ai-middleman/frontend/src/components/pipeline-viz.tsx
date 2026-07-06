@@ -54,6 +54,7 @@ export function usePipelineFeed() {
     queryKey: ["pipeline-events"],
     queryFn: () => api.pipelineEvents(sinceRef.current),
     refetchInterval: 800,
+    refetchIntervalInBackground: true,
     retry: 2,
   });
 
