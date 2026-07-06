@@ -32,6 +32,9 @@ export type SectorStat = { name: string; value: number };
 export type LocationStat = { name: string; value: number };
 export type ScatterPoint = { x: number; y: number; sector: string };
 export type SkillStat = { name: string; count: number };
+export type SeniorityStat = { name: string; value: number };
+export type StrengthBucket = { level: number; value: number };
+export type VipSlice = { name: string; value: number };
 
 export type ContactRow = {
   id: number;
@@ -96,6 +99,9 @@ export const api = {
   analyticsScatter: (limit = 500) => request<ScatterPoint[]>(`/api/analytics/scatter?limit=${limit}`),
   analyticsDealsBySector: () => request<SectorStat[]>("/api/analytics/deals-by-sector"),
   analyticsTopSkills: (limit = 8) => request<SkillStat[]>(`/api/analytics/top-skills?limit=${limit}`),
+  analyticsSeniority: () => request<SeniorityStat[]>("/api/analytics/seniority"),
+  analyticsStrengthDistribution: () => request<StrengthBucket[]>("/api/analytics/strength-distribution"),
+  analyticsVipBreakdown: () => request<VipSlice[]>("/api/analytics/vip-breakdown"),
   filterOptions: () => request<FilterOptions>("/api/filters/options"),
   activity: (limit = 10) => request<ActivityEvent[]>(`/api/activity?limit=${limit}`),
   contacts: (params: {

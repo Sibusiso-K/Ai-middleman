@@ -124,6 +124,53 @@ async def analytics_top_skills(request: Request, limit: int = Query(8, le=30)):
     return [dict(r) for r in rows]
 
 
+@router.get("/analytics/seniority")
+async def analytics_seniority(request: Request):
+    """Return contact counts grouped by seniority level, most common first."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT seniority AS name, COUNT(*) AS value
+            FROM contacts
+            WHERE seniority IS NOT NULL AND seniority != ''
+            GROUP BY seniority
+            ORDER BY value DESC
+            """
+        )
+    return [dict(r) for r in rows]
+
+
+@router.get("/analytics/strength-distribution")
+async def analytics_strength_distribution(request: Request):
+    """Return the count of contacts at each relationship-strength level (1-5)."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT relationship_strength AS level, COUNT(*) AS value
+            FROM contacts
+            WHERE relationship_strength IS NOT NULL
+            GROUP BY relationship_strength
+            ORDER BY relationship_strength
+            """
+        )
+    return [{"level": r["level"], "value": r["value"]} for r in rows]
+
+
+@router.get("/analytics/vip-breakdown")
+async def analytics_vip_breakdown(request: Request):
+    """Return the VIP vs standard contact split for a donut chart."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        vip = await conn.fetchval("SELECT COUNT(*) FROM contacts WHERE is_vip = TRUE")
+        standard = await conn.fetchval("SELECT COUNT(*) FROM contacts WHERE is_vip = FALSE OR is_vip IS NULL")
+    return [
+        {"name": "VIP", "value": vip},
+        {"name": "Standard", "value": standard},
+    ]
+
+
 @router.get("/filters/options")
 async def filter_options(request: Request):
     """Return the distinct sector/location/seniority values for the Contacts page filters."""
