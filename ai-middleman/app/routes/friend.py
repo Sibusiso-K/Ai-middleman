@@ -32,7 +32,6 @@ from app.services.matching_engine import MatchingEngine
 from app.services.draft_generator import DraftGenerator
 from app.services.conversation_manager import ConversationManager
 from app.services.whatsapp_client import WhatsAppClient
-from app.services.update_extractor import apply_update
 from app.services.contact_lookup import resolve_contact_by_name
 from app.services.pipeline_events import emit
 from app.log_safe import slog
@@ -544,25 +543,30 @@ async def _process_sam_message(db_pool, thread_id: int, text: str, friend_event_
         contact_name = update_target.get("contact_name")
         attribute = update_target.get("attribute", "")
         new_value = update_target.get("new_value", "")
-        who = contact_name or "their own record"
-        emit("updating", f"✏️ Contact update detected: {who} → {attribute} = {new_value!r}")
-        reply = await apply_update(
-            db_pool,
-            update_target=update_target,
-            changed_by=FRIEND_NAME,
-            source_message=text,
-        )
-        slog(f"[Friend] update reply: {reply}")
-        # Log the update as a thread event so it appears in the dashboard.
-        await manager.add_event(thread_id, "contact_updated", {
+        who = contact_name or "your own record"
+        emit("updating", f"✏️ Update proposed: {who} → {attribute} = {new_value!r}")
+
+        # Store the pending update so the webhook can apply it on Alex's tap.
+        await manager.add_event(thread_id, "update_pending", {
             "source_message": text,
-            "contact_name": contact_name,
-            "attribute": attribute,
-            "new_value": new_value,
-            "reply": reply,
+            "update_target": update_target,
         })
-        await whatsapp.send_message(to=ALEX_NUMBER, text=reply)
-        emit("resolved", f"✅ Database updated — {reply}")
+
+        # Ask Alex to confirm before touching the DB.
+        display_who = contact_name if contact_name else "your record"
+        prompt = (
+            f"📋 *{FRIEND_NAME} says:* \"{text}\"\n\n"
+            f"Update {display_who}'s *{attribute}* to: *{new_value}*?"
+        )
+        await whatsapp.send_interactive_buttons(
+            to=ALEX_NUMBER,
+            body_text=prompt,
+            buttons=[
+                {"type": "reply", "reply": {"id": "update_yes", "title": "✅ Update"}},
+                {"type": "reply", "reply": {"id": "update_no",  "title": "❌ Ignore"}},
+            ],
+        )
+        emit("awaiting_approval", f"⏳ Waiting for Alex to approve update to {who}'s {attribute}")
         return
 
     if not is_request:

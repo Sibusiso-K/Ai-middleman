@@ -196,6 +196,31 @@ class ConversationManager:
         event_type = {"sent": "draft_sent", "edited": "draft_edited", "skipped": "draft_skipped"}[action]
         await self.add_event(thread_id, event_type, {"final_text": final_text})
 
+    async def get_latest_pending_update(self, thread_id: int) -> Optional[Dict[str, Any]]:
+        """Return the most recent update_pending event if not yet resolved
+        (i.e. no later contact_updated or update_ignored event exists)."""
+        async with self.db_pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT id, payload, created_at
+                FROM thread_events
+                WHERE thread_id = $1 AND event_type = 'update_pending'
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, thread_id)
+            if not row:
+                return None
+            resolved = await conn.fetchval("""
+                SELECT COUNT(*) FROM thread_events
+                WHERE thread_id = $1
+                  AND event_type IN ('contact_updated', 'update_ignored')
+                  AND created_at > $2
+            """, thread_id, row['created_at'])
+        if resolved:
+            return None
+        payload = json.loads(row['payload']) if isinstance(row['payload'], str) else row['payload']
+        payload['event_id'] = row['id']
+        return payload
+
     async def set_autonomy_mode(self, thread_id: int, mode: str) -> None:
         """Set a thread's autonomy mode ('manual' or 'autonomous')."""
         if mode not in ("manual", "autonomous"):

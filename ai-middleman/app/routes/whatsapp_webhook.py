@@ -219,9 +219,55 @@ async def handle_alex_command(manager, thread_id, text, pending):
 
 
 async def handle_button_reply(manager, thread_id, reply_id: str):
-    """Handle a Send/Skip button tap. Button id format:
-    send_<eventid> / skip_<eventid>. (Edit is handled separately via a
-    WhatsApp Flow — see handle_flow_reply.)"""
+    """Handle button taps from Alex.
+
+    Draft buttons: send_<eventid> / skip_<eventid>
+    Update buttons: update_yes / update_no
+    (Edit is handled separately via a WhatsApp Flow — see handle_flow_reply.)
+    """
+    # ── Update approval / rejection ──────────────────────────────────────────
+    if reply_id in ("update_yes", "update_no"):
+        from app.services.update_extractor import apply_update
+        from app.services.whatsapp_client import WhatsAppClient
+        whatsapp = WhatsAppClient()
+
+        pending_update = await manager.get_latest_pending_update(thread_id)
+        if not pending_update:
+            print("[Button] No pending update to act on")
+            await whatsapp.send_message(to=ALEX_NUMBER, text="No pending update found — it may have already been resolved.")
+            return
+
+        update_target = pending_update.get("update_target", {})
+        source_message = pending_update.get("source_message", "")
+
+        if reply_id == "update_yes":
+            reply = await apply_update(
+                manager.db_pool,
+                update_target=update_target,
+                changed_by="Sam",
+                source_message=source_message,
+            )
+            await manager.add_event(thread_id, "contact_updated", {
+                "source_message": source_message,
+                "contact_name": update_target.get("contact_name"),
+                "attribute": update_target.get("attribute"),
+                "new_value": update_target.get("new_value"),
+                "reply": reply,
+            })
+            await whatsapp.send_message(to=ALEX_NUMBER, text=f"Done! {reply}")
+            slog(f"[Update] Alex approved: {reply}")
+            emit("resolved", f"✅ Alex approved the update — {reply}")
+        else:
+            await manager.add_event(thread_id, "update_ignored", {
+                "source_message": source_message,
+                "update_target": update_target,
+            })
+            await whatsapp.send_message(to=ALEX_NUMBER, text="No problem — left it unchanged.")
+            slog("[Update] Alex ignored the proposed update")
+            emit("resolved", "❌ Alex ignored the update — no changes made")
+        return
+
+    # ── Draft approval / rejection ───────────────────────────────────────────
     pending = await manager.get_latest_pending_draft(thread_id)
     if not pending:
         print("[Button] No pending draft to act on")
