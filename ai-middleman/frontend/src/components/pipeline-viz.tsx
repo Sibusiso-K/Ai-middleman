@@ -4,6 +4,7 @@ import { Card } from "@/components/ui-bits";
 import { api, type PipelineEvent } from "@/lib/api";
 import {
   Mail, Radio, Search, BrainCircuit, Link2, PenLine, Send, CheckCircle2,
+  Database, UserSearch,
 } from "lucide-react";
 
 const STAGE_NODES = [
@@ -11,6 +12,8 @@ const STAGE_NODES = [
   { key: "relaying", icon: Radio, label: "Relaying to Alex" },
   { key: "checking", icon: Search, label: "Quick pattern check" },
   { key: "intent", icon: BrainCircuit, label: "AI: is this a request?" },
+  { key: "updating", icon: Database, label: "Updating contact record" },
+  { key: "named_lookup", icon: UserSearch, label: "Looking up named contact" },
   { key: "matching", icon: Link2, label: "Matching contacts" },
   { key: "drafting", icon: PenLine, label: "Writing a draft" },
   { key: "awaiting_approval", icon: Send, label: "Waiting on Alex" },
@@ -29,6 +32,8 @@ const STAGE_ACCENT: Record<string, Accent> = {
   intent:            { icon: "text-violet-500", ring: "border-violet-400", fill: "bg-violet-400/15", glow: "shadow-violet-400/50", line: "bg-violet-400", feed: "border-l-violet-400" },
   matching:          { icon: "text-amber-500",  ring: "border-amber-400",  fill: "bg-amber-400/15",  glow: "shadow-amber-400/50",  line: "bg-amber-400",  feed: "border-l-amber-400" },
   drafting:          { icon: "text-amber-500",  ring: "border-amber-400",  fill: "bg-amber-400/15",  glow: "shadow-amber-400/50",  line: "bg-amber-400",  feed: "border-l-amber-400" },
+  updating:          { icon: "text-teal-500",    ring: "border-teal-400",    fill: "bg-teal-400/15",    glow: "shadow-teal-400/50",    line: "bg-teal-400",    feed: "border-l-teal-400" },
+  named_lookup:      { icon: "text-fuchsia-500", ring: "border-fuchsia-400", fill: "bg-fuchsia-400/15", glow: "shadow-fuchsia-400/50", line: "bg-fuchsia-400", feed: "border-l-fuchsia-400" },
   awaiting_approval: { icon: "text-primary",    ring: "border-primary",    fill: "bg-primary/15",    glow: "shadow-primary/50",    line: "bg-primary",    feed: "border-l-primary" },
   resolved:          { icon: "text-success",    ring: "border-success",    fill: "bg-success/15",    glow: "shadow-success/50",    line: "bg-success",    feed: "border-l-success" },
 };

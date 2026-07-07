@@ -58,6 +58,30 @@ def _looks_like_details_request(text: str) -> bool:
     return bool(_DETAILS_REQUEST_RE.search(text))
 
 
+# Title-Case name sequences ("Aaron Acosta"), used to guard the "send me
+# their details" fallback below: without this, "Do you know Aaron Acosta? Do
+# you have his details?" was being hijacked by the generic details-request
+# fallback and handed the details of whoever was last sent (a stale, unrelated
+# contact from earlier in the thread) instead of reaching the named-contact
+# lookup — because the fallback only ever looked at "last sent match", never
+# at whether the message actually named someone else entirely.
+_PROPER_NAME_RE = re.compile(r"\b([A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)+)\b")
+
+
+def _mentions_unmatched_name(text: str, matches: list) -> bool:
+    """True if text contains a full name that isn't one of the currently
+    suggested matches — signals Sam is asking about someone NEW, so the
+    generic "resend last details" fallback must not claim this message."""
+    found = _PROPER_NAME_RE.findall(text)
+    if not found:
+        return False
+    known_first_names = {
+        (m.get("name") or "").split()[0].lower()
+        for m in matches if m.get("name")
+    }
+    return any(name.split()[0].lower() not in known_first_names for name in found)
+
+
 # Short, whole-message confirmations — used to detect "yeah"/"yep"/"correct"
 # replying to Alex's own clarifying question ("Oh you mean AI consulting?").
 _AFFIRMATION_RE = re.compile(
@@ -205,7 +229,10 @@ async def _handle_followup_selection(db_pool, thread_id: int, text: str, whatsap
 
     # Generic "send me their details" with no name/position: if only one
     # person was suggested (or one was actually sent), that's who they mean.
-    if not selected and _looks_like_details_request(text):
+    # But NOT if the message names someone else entirely ("Do you know Aaron
+    # Acosta? Do you have his details?") — that's a fresh named-contact
+    # question, not a request to resend the last person's details.
+    if not selected and _looks_like_details_request(text) and not _mentions_unmatched_name(text, matches):
         last = await manager.get_last_sent_match(thread_id)
         if last:
             selected = [last]
@@ -279,7 +306,7 @@ async def _handle_named_contact_lookup(
     in the draft text if Sam's message itself asked for details, otherwise
     the draft just confirms the contact exists and offers to share more."""
     manager = ConversationManager(db_pool)
-    emit("checking", f"🔍 Looking up {named_contact} directly")
+    emit("named_lookup", f"🔍 Looking up {named_contact} directly")
 
     async with db_pool.acquire() as conn:
         contact = await resolve_contact_by_name(conn, named_contact)

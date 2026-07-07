@@ -19,6 +19,7 @@ _next_id = count(1)
 # still recorded (and shown in the feed) but won't highlight a node.
 STAGES = (
     "received", "relaying", "checking", "intent",
+    "updating", "named_lookup",
     "matching", "drafting", "awaiting_approval", "resolved",
 )
 

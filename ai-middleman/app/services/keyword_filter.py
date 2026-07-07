@@ -109,7 +109,16 @@ class KeywordFilter:
     # often incidental) but stay in the WHERE clause for recall. seniority is
     # its own column ("Junior"/"Senior"/"Partner"/"Director"...) — queries like
     # "anyone from JPMorgan in a senior position" need it searched directly,
-    # since "senior" doesn't reliably appear inside title text.
+    # since "senior" doesn't reliably appear inside title text. location is
+    # searched here too as a fallback: the dedicated location_pattern/
+    # location_expr mechanism below only recognises a curated list of major
+    # cities, so a contact based in e.g. "Cape Town" or "Tel Aviv" (real
+    # values in this dataset, not in that curated list) was previously
+    # invisible to any location-based query at all — this closes that gap
+    # for every city, not just the curated ones. how_alex_knows_them
+    # (freeform relationship context, e.g. "University friend — Wits CS")
+    # is included at low weight so "anyone I know from Wits" can surface a
+    # contact even when their role/company text alone wouldn't match.
     _RELEVANCE_FIELDS = [
         ("title", 3),
         ("expertise_tags", 2),
@@ -117,13 +126,16 @@ class KeywordFilter:
         ("sector", 2),
         ("specialty", 2),
         ("seniority", 2),
+        ("location", 2),
         ("company", 1),
         ("full_name", 1),
+        ("how_alex_knows_them", 1),
     ]
 
     # Fields searched to decide whether a row is a candidate at all (recall).
     _WHERE_FIELDS = [
         "full_name", "title", "company", "sector", "specialty", "seniority",
+        "location", "how_alex_knows_them",
         "expertise_tags", "can_help_with", "looking_for", "comment",
     ]
 
