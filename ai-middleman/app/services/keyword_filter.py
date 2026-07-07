@@ -56,6 +56,31 @@ STOPWORDS = frozenset({
     "alex", "sam",
 })
 
+# Role/topic words → the contact sector they imply. Contacts often describe
+# themselves in domain vocabulary that never contains the query's word: a
+# corporate lawyer's fields say "competition law", "M&A", "legal diligence" —
+# never "lawyer" or even "corporate". Without this, a "lawyer" query scores
+# those real lawyers 0 and surfaces healthcare "Head of Corporate Dev" people
+# instead (whose title literally contains "corporate"). Mapping the intent word
+# to its sector lets the right sector win. Only unambiguous words are mapped —
+# ambiguous ones (e.g. "partner", "investment") are deliberately left out.
+# Values are lowercase regex fragments matched against the DB sector column.
+SECTOR_HINTS = {
+    "lawyer": "legal", "lawyers": "legal", "attorney": "legal",
+    "attorneys": "legal", "litigation": "legal", "litigator": "legal",
+    "solicitor": "legal", "barrister": "legal", "counsel": "legal",
+    "healthcare": "healthcare", "medical": "healthcare", "pharma": "healthcare",
+    "biotech": "healthcare", "clinical": "healthcare", "medtech": "healthcare",
+    "energy": "energy", "renewable": "energy", "renewables": "energy",
+    "solar": "energy", "wind": "energy",
+    "property": "real estate", "estate": "real estate", "realty": "real estate",
+    "recruiter": "recruiting", "recruiting": "recruiting",
+    "recruitment": "recruiting", "talent": "recruiting", "headhunter": "recruiting",
+    "fintech": "tech", "software": "tech", "saas": "tech", "developer": "tech",
+    "engineer": "tech", "engineering": "tech", "cto": "tech",
+    "banker": "finance", "banking": "finance", "hedge": "finance",
+}
+
 
 class KeywordFilter:
     def __init__(self, db_pool: asyncpg.Pool):
@@ -121,15 +146,20 @@ class KeywordFilter:
         kw_pattern = r"\y(" + "|".join(sorted(set(kw_terms))) + r")" if kw_terms else None
         location_pattern = "|".join(location_tokens) if has_location else None
 
-        sql, params = self._build_sql(kw_pattern, location_pattern)
+        # Sector hints from the query's role/topic words (see SECTOR_HINTS).
+        hint_sectors = sorted({SECTOR_HINTS[t] for t in tokens if t in SECTOR_HINTS})
+        hint_pattern = "|".join(hint_sectors) if hint_sectors else None
+
+        sql, params = self._build_sql(kw_pattern, location_pattern, hint_pattern)
         async with self.db_pool.acquire() as conn:
             results = await conn.fetch(sql, *params)
         return [dict(row) for row in results]
 
-    def _build_sql(self, kw_pattern, location_pattern):
+    def _build_sql(self, kw_pattern, location_pattern, hint_pattern=None):
         """Assemble the candidate query from whichever signals are present:
-        keyword terms, a location, or both. relevance_score is always the
-        primary sort so role/skill relevance wins over incidental VIP status."""
+        keyword terms, a location, a sector hint, or a mix. relevance_score is
+        always the primary sort so role/sector relevance wins over incidental
+        VIP status."""
         select_cols = (
             "id, contact_id, full_name, phone, email, company, title, "
             "sector, specialty, location, seniority, expertise_tags, "
@@ -137,22 +167,32 @@ class KeywordFilter:
             "how_alex_knows_them, is_vip, comment"
         )
         params = []
-        kw_idx = loc_idx = None
+        kw_idx = loc_idx = hint_idx = None
         if kw_pattern is not None:
             params.append(kw_pattern)
             kw_idx = len(params)
         if location_pattern is not None:
             params.append(location_pattern)
             loc_idx = len(params)
+        if hint_pattern is not None:
+            params.append(hint_pattern)
+            hint_idx = len(params)
 
-        # relevance_score: weighted sum of high-signal field matches.
+        # relevance_score: weighted sum of high-signal keyword-field matches,
+        # plus a sector-hint boost so the sector the query implies (e.g.
+        # "lawyer" -> Legal) outranks a wrong-sector contact that merely shares
+        # a word ("corporate" in a healthcare "Corporate Dev" title).
+        relevance_terms = []
         if kw_idx is not None:
-            relevance_expr = " + ".join(
+            relevance_terms += [
                 f"(CASE WHEN LOWER({field}) ~ ${kw_idx} THEN {weight} ELSE 0 END)"
                 for field, weight in self._RELEVANCE_FIELDS
+            ]
+        if hint_idx is not None:
+            relevance_terms.append(
+                f"(CASE WHEN LOWER(sector) ~ ${hint_idx} THEN 4 ELSE 0 END)"
             )
-        else:
-            relevance_expr = "0"
+        relevance_expr = " + ".join(relevance_terms) if relevance_terms else "0"
 
         location_expr = (
             f"CASE WHEN LOWER(location) ~ ${loc_idx} THEN 3 ELSE 0 END"
@@ -160,7 +200,7 @@ class KeywordFilter:
         )
 
         # WHERE: a row qualifies if it matches any searched field on the keyword
-        # pattern, or (when a location was given) is in that location.
+        # pattern, is in the requested location, or is in the hinted sector.
         where_clauses = []
         if kw_idx is not None:
             where_clauses.append(
@@ -168,6 +208,8 @@ class KeywordFilter:
             )
         if loc_idx is not None:
             where_clauses.append(f"LOWER(location) ~ ${loc_idx}")
+        if hint_idx is not None:
+            where_clauses.append(f"LOWER(sector) ~ ${hint_idx}")
         where_sql = " OR ".join(where_clauses) if where_clauses else "TRUE"
 
         sql = f"""
