@@ -345,21 +345,12 @@ async def _handle_named_contact_lookup(
     role_bits = " / ".join(filter(None, [contact.get("title"), contact.get("company")]))
     role_note = f" — {role_bits}" if role_bits else ""
 
-    wants_details = _looks_like_details_request(text)
-    if wants_details and (contact.get("phone") or contact.get("email")):
-        details_str = " / ".join(filter(None, [
-            f"📞 {contact['phone']}" if contact.get("phone") else None,
-            f"📧 {contact['email']}" if contact.get("email") else None,
-        ]))
-        generator = DraftGenerator()
-        draft = await generator.generate_details_draft([{
-            "full_name": full_name,
-            "details_str": details_str,
-            "title": contact.get("title"),
-            "company": contact.get("company"),
-        }])
-    else:
-        draft = f"Yeah I know {first}{role_note}. Want me to send you their details?"
+    # Always send a confirmation first ("Yeah I know Kara, she's Partner at Bain
+    # Capital. That who you're after?") rather than jumping straight to details.
+    # The two-step flow is more conversational and lets Sam correct a wrong match
+    # before PII goes out. Once Sam says "yes" / "yeah" / "send her details",
+    # the affirmation path or followup-selection path sends the actual details.
+    draft = f"Yeah I know {first}{role_note}. That who you're after?"
 
     match_stub = [{
         "contact_id": contact["id"],
@@ -372,6 +363,9 @@ async def _handle_named_contact_lookup(
         "original_message": text,
         "draft_reply": draft,
         "matches": match_stub,
+        # Flag used by affirmation path to know "yeah" here means "yes, send
+        # me their details" rather than "yes to Alex's matching question".
+        "draft_type": "named_contact_confirmation",
     })
     buttons = [
         {"type": "reply", "reply": {"id": f"send_{event_id}", "title": "✅ Send"}},
@@ -380,10 +374,10 @@ async def _handle_named_contact_lookup(
     draft_body = (
         f"🤖 *{FRIEND_NAME} asked about {full_name}*\n\n"
         f"*Draft:* {draft}\n\n"
-        f"Tap Send to use it as-is, or Skip to hold off."
+        f"Tap Send to confirm, or Skip to hold off."
     )
     await whatsapp.send_interactive_buttons(to=ALEX_NUMBER, body_text=draft_body, buttons=buttons)
-    emit("awaiting_approval", "📤 Sent to Alex for approval — waiting for Send/Skip")
+    emit("awaiting_approval", "📤 Confirmation sent to Alex — waiting for Send/Skip")
 
 
 async def _run_matching_and_push_draft(
@@ -499,12 +493,61 @@ async def _process_sam_message(db_pool, thread_id: int, text: str, friend_event_
     if await _handle_followup_selection(db_pool, thread_id, text, whatsapp):
         return
 
-    # A short confirmation ("yeah") immediately after Alex asked a clarifying
-    # question ("Oh you mean AI consulting?") means: run matching on what
-    # Alex asked, not on Sam's short "yeah" — the classifier alone can't see
-    # that confirmation, since it only ever looks at Sam's raw text.
+    # A short confirmation ("yeah") could mean two different things depending on
+    # what the last draft was:
+    #   A) The last draft was a named-contact confirmation ("Yeah I know Kara,
+    #      that who you're after?") — Sam's "yeah" means "yes, send me their
+    #      details." Generate and push the actual details draft.
+    #   B) Alex asked a clarifying question ("Oh you mean AI consulting?") and
+    #      Sam is confirming — run matching on Alex's phrasing instead of Sam's
+    #      short "yeah."
     if _looks_like_affirmation(text):
-        emit("checking", "🔍 That looks like a 'yes' to Alex's earlier question")
+        emit("checking", "🔍 That looks like a 'yes'")
+
+        last_payload = await manager.get_last_draft_payload(thread_id)
+        if last_payload and last_payload.get("draft_type") == "named_contact_confirmation":
+            matches = last_payload.get("matches") or []
+            if matches:
+                m = matches[0]
+                cid = m.get("contact_id")
+                if cid:
+                    async with db_pool.acquire() as conn:
+                        c = await conn.fetchrow(
+                            "SELECT full_name, title, company, phone, email FROM contacts WHERE id = $1", cid
+                        )
+                    if c and (c["phone"] or c["email"]):
+                        details_str = " / ".join(filter(None, [
+                            f"📞 {c['phone']}" if c["phone"] else None,
+                            f"📧 {c['email']}" if c["email"] else None,
+                        ]))
+                        generator = DraftGenerator()
+                        draft = await generator.generate_details_draft([{
+                            "full_name": c["full_name"],
+                            "details_str": details_str,
+                            "title": c["title"],
+                            "company": c["company"],
+                        }])
+                        emit("named_lookup", f"🔍 Sam confirmed — pulling {c['full_name'].split()[0]}'s details")
+                        event_id = await manager.add_event(thread_id, "draft_suggested", {
+                            "original_message": text,
+                            "draft_reply": draft,
+                            "matches": matches,
+                        })
+                        buttons = [
+                            {"type": "reply", "reply": {"id": f"send_{event_id}", "title": "✅ Send"}},
+                            {"type": "reply", "reply": {"id": f"skip_{event_id}", "title": "❌ Skip"}},
+                        ]
+                        who = c["full_name"]
+                        draft_body = (
+                            f"🤖 *{FRIEND_NAME} confirmed — here are {who.split()[0]}'s details*\n\n"
+                            f"*Draft:*\n{draft}\n\n"
+                            f"Tap Send to share, or Skip to hold off."
+                        )
+                        await whatsapp.send_interactive_buttons(to=ALEX_NUMBER, body_text=draft_body, buttons=buttons)
+                        emit("awaiting_approval", f"📤 Details draft sent to Alex — waiting for Send/Skip")
+                        return
+
+        # Case B: "yes" to Alex's clarifying question ("Oh you mean AI consulting?")
         clarification = await manager.get_last_open_alex_question(thread_id)
         if clarification:
             effective_request = clarification.rstrip("?").strip()
@@ -555,7 +598,12 @@ async def _process_sam_message(db_pool, thread_id: int, text: str, friend_event_
 
     is_update = classification.get("is_update", False)
     if is_update:
-        update_target = classification.get("update_target") or {}
+        # Intent classifier flags the update; a dedicated LLM call extracts
+        # the precise {contact_name, attribute, new_value} — better accuracy
+        # than asking the 5-in-1 intent prompt to do both jobs at once.
+        from app.services.update_extractor import extract_update_target
+        emit("updating", "✏️ Extracting update details…")
+        update_target = await extract_update_target(text)
         contact_name = update_target.get("contact_name")
         attribute = update_target.get("attribute", "")
         new_value = update_target.get("new_value", "")

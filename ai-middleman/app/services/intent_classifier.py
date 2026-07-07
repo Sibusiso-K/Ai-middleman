@@ -132,9 +132,9 @@ Neither (is_request=false, is_update=false):
 Message: "{message}"
 
 Reply with ONLY this exact JSON shape, nothing else — no markdown, no explanation:
-{{"language": "English or Afrikaans, nothing else", "is_request": true or false, "is_update": true or false, "named_contact": "<full name or null>", "english_query": "<English rendering of the message>", "update_target": {{"contact_name": "<name or null if sender updating themselves>", "attribute": "<attribute_name>", "new_value": "<new value>"}} }}
+{{"language": "English or Afrikaans, nothing else", "is_request": true or false, "is_update": true or false, "named_contact": "<full name or null>", "english_query": "<English rendering of the message>"}}
 
-If is_update is false, set update_target to null. If no specific person is named, set named_contact to null."""
+If no specific person is named for a request, set named_contact to null."""
 
         last_error = None
         for config in self.configs:
@@ -177,14 +177,12 @@ If is_update is false, set update_target to null. If no specific person is named
                                 slog(f"[Intent] model said Afrikaans but text looks Nguni, not Afrikaans — defaulting to English: {message[:60]!r}")
                                 detected_language = "English"
                             is_update = bool(data.get("is_update"))
-                            update_target = data.get("update_target") if is_update else None
                             named_contact = data.get("named_contact") or None
                             if isinstance(named_contact, str) and not named_contact.strip():
                                 named_contact = None
                             result = {
                                 "is_request": bool(data.get("is_request")),
                                 "is_update": is_update,
-                                "update_target": update_target,
                                 "named_contact": named_contact,
                                 "language": detected_language,
                                 "english_query": data.get("english_query") or message,

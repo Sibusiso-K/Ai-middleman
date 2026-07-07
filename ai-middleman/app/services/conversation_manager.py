@@ -160,6 +160,21 @@ class ConversationManager:
         payload = json.loads(row['payload']) if isinstance(row['payload'], str) else row['payload']
         return payload.get('matches')
 
+    async def get_last_draft_payload(self, thread_id: int) -> Optional[dict]:
+        """Return the full payload of the most recent draft_suggested event.
+        Used to check draft_type (e.g. 'named_contact_confirmation') for
+        context-sensitive follow-up handling."""
+        async with self.db_pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT payload FROM thread_events
+                WHERE thread_id = $1 AND event_type = 'draft_suggested'
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, thread_id)
+        if not row:
+            return None
+        return json.loads(row['payload']) if isinstance(row['payload'], str) else row['payload']
+
     async def get_latest_pending_draft(self, thread_id: int) -> Optional[Dict[str, Any]]:
         """
         Return the most recent draft_suggested event for a thread if it is
