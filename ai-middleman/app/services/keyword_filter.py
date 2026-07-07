@@ -146,11 +146,12 @@ class KeywordFilter:
 
         # Known location keywords to detect and prioritise
         location_keywords = [
-            'london', 'new york', 'york', 'dubai', 'singapore', 'johannesburg',
+            'london', 'new york', 'york', 'dubai', 'singapore', 'johannesburg', 'joburg', 'jozi',
             'toronto', 'sydney', 'mumbai', 'paris', 'frankfurt', 'zurich',
             'geneva', 'amsterdam', 'chicago', 'boston', 'angeles', 'francisco',
             'paulo', 'hong kong', 'shanghai', 'berlin', 'tokyo', 'africa',
-            'europe', 'asia', 'usa', 'uk', 'uae', 'canada', 'australia'
+            'europe', 'asia', 'usa', 'uk', 'uae', 'canada', 'australia',
+            'cape town', 'pretoria', 'nairobi', 'lagos', 'accra'
         ]
         query_lower = query.lower()
         location_tokens = [loc for loc in location_keywords if loc in query_lower]
