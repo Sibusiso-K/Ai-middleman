@@ -36,7 +36,9 @@
     {"query": "Real estate investment chairman in Dubai", "expected_sector": "Real Estate", "expected_location_contains": "Dubai"},
     {"query": "Tech CTO in Zurich", "expected_sector": "Tech", "expected_location_contains": "Zurich", "_note": "unseen combo - generalization check"},
     {"query": "Recruiting partner in Tel Aviv", "expected_sector": "Recruiting/Other", "expected_location_contains": "Tel Aviv", "_note": "unseen combo - generalization check"},
-    {"query": "Someone in Johannesburg who does corporate law", "expected_location_contains": null, "_note": "Johannesburg isn't in the seed dataset - correct behavior is an honest low-confidence/no-match, NOT a hallucinated JHB contact"}
+    {"query": "Someone in Johannesburg who does corporate law", "expected_location_contains": null, "_note": "Johannesburg isn't in the seed dataset - correct behavior is an honest low-confidence/no-match, NOT a hallucinated JHB contact"},
+    {"query": "Any private equity partners in Dubai I should meet?", "expected_sector": "Finance", "expected_location_contains": "Dubai", "_note": "regression: after stopword+relevance-ranking fix, Stage 1 must surface PE/Finance in Dubai, not random Dubai contacts"},
+    {"query": "Do you know any energy investors in Amsterdam?", "expected_sector": "Energy", "expected_location_contains": "Amsterdam", "_note": "regression: must surface Energy partners in Amsterdam, not London tech people"}
   ],
 
   "followup": {

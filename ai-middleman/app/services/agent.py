@@ -163,19 +163,21 @@ First, determine what the user is actually asking for. Identify:
 - Does the query specify a SENIORITY level?
 
 STEP 2 — SCORING RULES (apply strictly, only use factors the user actually requested):
-1. ROLE/SKILL MATCH (always primary): Does their title, expertise, and what they can help with directly match what the user needs?
-2. LOCATION MATCH (only if user specified a location): If the user specified a city or country, contacts in that location score higher. A contact in the wrong location should NEVER score above 0.6. If NO location was specified, ignore location entirely — do not penalize or reward based on location.
-3. SECTOR MATCH (only if user specified a sector): If the user asked for a specific industry, match on that.
+1. ROLE/SKILL MATCH (always primary): Does their title, expertise, and what they can help with directly match what the user needs? A contact whose ACTUAL role/skill does not do what the user asked for must score BELOW 0.5 — no matter how senior, VIP, or well-connected they are. A great tech founder is NOT a match for a "hedge fund" request; a marketer is NOT a match for a "lawyer" request.
+2. LOCATION MATCH (only if user specified a location): If the user specified a city or country, contacts in that location score higher. A contact in the wrong location should NEVER score above 0.6. If NO location was specified, ignore location entirely — do not penalize or reward based on location. Being in the right city does NOT rescue a wrong-role contact — right city + wrong role is still below 0.5.
+3. SECTOR MATCH (only if user specified a sector): If the user asked for a specific industry, match on that. A contact in a DIFFERENT sector than the one requested must score BELOW 0.5.
 4. SENIORITY: More senior contacts (Partner, MD, Director) are preferred over junior ones for the same role.
 5. RELATIONSHIP STRENGTH: Higher relationship strength (4-5) is preferred over weaker connections (1-2) when skills are equal.
 6. VIP STATUS: VIP contacts get a small boost when all else is equal.
 
-CONFIDENCE SCORE GUIDE:
-- 0.9-1.0: Perfect match — right role, right location (if requested), right seniority, strong relationship
-- 0.7-0.89: Good match — right role, matches most other requested criteria
-- 0.5-0.69: Partial match — somewhat related role, or right role but wrong location (if location was requested)
-- 0.3-0.49: Weak match — loosely related skills
+CONFIDENCE SCORE GUIDE (a score of 0.7+ REQUIRES a genuine role/sector match — not merely the right city or a strong relationship):
+- 0.9-1.0: Perfect match — right role AND right sector, right location (if requested), right seniority, strong relationship
+- 0.7-0.89: Good match — genuinely does the requested role/sector, matches most other requested criteria
+- 0.5-0.69: Partial match — right role but wrong location (if location was requested), or right role but slightly off on seniority
+- 0.3-0.49: Weak match — only LOOSELY, SOMEWHAT, or TANGENTIALLY related to what was asked. If you find yourself writing "somewhat related", "loosely related", "adjacent", or "could still help" in your reasoning, the score belongs HERE (below 0.5), not above it.
 - Below 0.3: Do not include
+
+CRITICAL: It is far better to return FEWER matches (or none) than to pad the list with wrong-role/wrong-sector contacts scored above 0.5. If nobody genuinely fits, set match_quality to "weak" or "none" — do not inflate a loose match to look confident.
 
 TRUTHFULNESS RULES — CRITICAL:
 - NEVER claim a contact "matches the location requirement" if the user did NOT specify a location.
