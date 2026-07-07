@@ -431,7 +431,14 @@ async def _run_matching_and_push_draft(
     event_id = await manager.add_event(thread_id, "draft_suggested", {
         "original_message": request_text,
         "draft_reply": draft,
-        "matches": all_matches,
+        # Only store matches that actually cleared the viability bar — Sam
+        # was told about these (or told "nothing great"), so a follow-up like
+        # "connect me with the first one" must never resolve positionally
+        # into a sub-threshold contact that was silently rejected. Storing
+        # all_matches here let exactly that happen: "nothing great in my
+        # network" followed by "connect me with the first one" would still
+        # draft a confident intro to the contact that was just rejected.
+        "matches": viable,
     })
 
     # WhatsApp interactive messages can't mix reply buttons with a Flow
