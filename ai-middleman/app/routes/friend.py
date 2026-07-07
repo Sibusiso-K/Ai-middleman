@@ -32,6 +32,7 @@ from app.services.matching_engine import MatchingEngine
 from app.services.draft_generator import DraftGenerator
 from app.services.conversation_manager import ConversationManager
 from app.services.whatsapp_client import WhatsAppClient
+from app.services.update_extractor import apply_update
 from app.services.pipeline_events import emit
 from app.log_safe import slog
 
@@ -408,7 +409,7 @@ async def _process_sam_message(db_pool, thread_id: int, text: str, friend_event_
         except IntentClassificationError as e:
             slog(f"[Friend] Intent classification unavailable, failing open: {e}")
             emit("intent", "⚠️ AI classifier unreachable — assuming yes, just in case")
-            return {"is_request": True, "language": "English", "english_query": text}, True
+            return {"is_request": True, "is_update": False, "update_target": None, "language": "English", "english_query": text}, True
 
     (classification, classify_failed), candidates = await asyncio.gather(
         _classify(), engine.keyword_filter.filter_candidates(text)
@@ -429,6 +430,33 @@ async def _process_sam_message(db_pool, thread_id: int, text: str, friend_event_
     else:
         language = detected_language
     await manager.tag_event_language(friend_event_id, language)
+
+    is_update = classification.get("is_update", False)
+    if is_update:
+        update_target = classification.get("update_target") or {}
+        contact_name = update_target.get("contact_name")
+        attribute = update_target.get("attribute", "")
+        new_value = update_target.get("new_value", "")
+        who = contact_name or "their own record"
+        emit("updating", f"✏️ Contact update detected: {who} → {attribute} = {new_value!r}")
+        reply = await apply_update(
+            db_pool,
+            update_target=update_target,
+            changed_by=FRIEND_NAME,
+            source_message=text,
+        )
+        slog(f"[Friend] update reply: {reply}")
+        # Log the update as a thread event so it appears in the dashboard.
+        await manager.add_event(thread_id, "contact_updated", {
+            "source_message": text,
+            "contact_name": contact_name,
+            "attribute": attribute,
+            "new_value": new_value,
+            "reply": reply,
+        })
+        await whatsapp.send_message(to=ALEX_NUMBER, text=reply)
+        emit("resolved", f"✅ Database updated — {reply}")
+        return
 
     if not is_request:
         emit("resolved", "🙅 Not a contact request — nothing to do")

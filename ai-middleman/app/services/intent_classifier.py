@@ -87,15 +87,16 @@ class IntentClassifier:
 
 Friends may write to him in {languages_list}, and sometimes code-switch naturally between the two in the same message.
 
-Do all three of the following in one pass:
+Do ALL FOUR of the following in one pass:
 
 1. Identify which language the message is written in: {languages_list} only — no other option exists. If it's already in English, is mostly English with just a greeting/aside in Afrikaans, is short/ambiguous, or you are not confident it is genuinely Afrikaans, say "English". Only say "Afrikaans" if you are confident the message is substantially written in Afrikaans.
-2. Decide: is this message asking Alex to introduce someone, recommend a contact, refer someone, or connect the sender with a person from Alex's professional network?
-3. Give an English rendering of the message. If it's already in English, repeat it unchanged. Translate meaning, not word-for-word — keep any names, companies, and locations exactly as written.
+2. Decide: is this message asking Alex to introduce someone, recommend a contact, refer someone, or connect the sender with a person from Alex's professional network? (is_request)
+3. Decide: is this message sharing NEW factual information that should update a contact record — e.g. a new employer, new job title, new phone, new email, a promotion, or a location change? (is_update). This is DIFFERENT from a request: "I heard Aaron works at Deloitte now" is an update, NOT a request. "I moved to Yoco" is an update about the sender themselves.
+4. Give an English rendering of the message. If it's already in English, repeat it unchanged. Translate meaning, not word-for-word — keep any names, companies, and locations exactly as written.
 
 The message may contain typos, missing letters, or autocorrect mistakes (people type fast on WhatsApp) — read past the typos and judge the intended meaning, not the exact spelling. For example "i want sometging is Al consunltinnng" means "I want something in AI consulting" and IS a contact request.
 
-Examples that ARE contact requests:
+is_request examples (TRUE):
 - "Do you know any good lawyers in London?"
 - "Who should I speak to about raising Series A?"
 - "Can you connect me with someone in private equity?"
@@ -104,21 +105,30 @@ Examples that ARE contact requests:
 - "Know anyone who does M&A advisory?"
 - "Who's your guy for debt financing?"
 
-Examples that are NOT contact requests:
+is_update examples (TRUE, is_request must be false):
+- "Aaron Acosta works at Deloitte now" → contact_name: "Aaron Acosta", attribute: "company", new_value: "Deloitte"
+- "Sarah left McKinsey, she's at BCG now" → contact_name: "Sarah", attribute: "company", new_value: "BCG"
+- "Thabo got promoted to Managing Director" → contact_name: "Thabo", attribute: "title", new_value: "Managing Director"
+- "I moved to Yoco, not Takealot anymore" → contact_name: null (sender updating themselves), attribute: "company", new_value: "Yoco"
+- "My email changed to sam@yoco.com" → contact_name: null, attribute: "email", new_value: "sam@yoco.com"
+- "My new number is 082 555 1234" → contact_name: null, attribute: "phone", new_value: "082 555 1234"
+
+Attribute name must be one of: company, title, email, phone, location, sector, specialty.
+
+Neither (is_request=false, is_update=false):
 - "Hey how are you doing?"
 - "Are we still on for dinner?"
 - "Thanks for yesterday"
 - "Call me when you're free"
 - "What do you think about the market?"
-- "Send"
-- "Skip"
-- "Edit"
-- "Status"
+- "Send" / "Skip" / "Edit" / "Status"
 
 Message: "{message}"
 
 Reply with ONLY this exact JSON shape, nothing else — no markdown, no explanation:
-{{"language": "English or Afrikaans, nothing else", "is_request": true or false, "english_query": "<English rendering of the message>"}}"""
+{{"language": "English or Afrikaans, nothing else", "is_request": true or false, "is_update": true or false, "english_query": "<English rendering of the message>", "update_target": {{"contact_name": "<name or null if sender updating themselves>", "attribute": "<attribute_name>", "new_value": "<new value>"}} }}
+
+If is_update is false, set update_target to null."""
 
         last_error = None
         for config in self.configs:
@@ -160,12 +170,16 @@ Reply with ONLY this exact JSON shape, nothing else — no markdown, no explanat
                                 # isiZulu (or another Nguni language we don't support).
                                 slog(f"[Intent] model said Afrikaans but text looks Nguni, not Afrikaans — defaulting to English: {message[:60]!r}")
                                 detected_language = "English"
+                            is_update = bool(data.get("is_update"))
+                            update_target = data.get("update_target") if is_update else None
                             result = {
                                 "is_request": bool(data.get("is_request")),
+                                "is_update": is_update,
+                                "update_target": update_target,
                                 "language": detected_language,
                                 "english_query": data.get("english_query") or message,
                             }
-                            slog(f"[Intent/{config['name']}] {result['language']}, is_request={result['is_request']} (attempt {attempt})")
+                            slog(f"[Intent/{config['name']}] {result['language']}, is_request={result['is_request']}, is_update={result['is_update']} (attempt {attempt})")
                             return result
                         except ValueError as e:
                             # Malformed / non-JSON reply — retry (transient LLM behaviour).
