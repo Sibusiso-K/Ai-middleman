@@ -4,6 +4,7 @@
 \usepackage{enumitem}
 \usepackage{xcolor}
 \usepackage{fancyhdr}
+\usepackage{booktabs}
 \usepackage{tcolorbox}
 \tcbuselibrary{skins}
 
@@ -21,7 +22,7 @@
 
 \pagestyle{fancy}
 \fancyhf{}
-\fancyfoot[C]{\small\color{gray}AI Middleman -- 30-Second Pitch}
+\fancyfoot[C]{\small\color{gray}AI Middleman -- 30-Second Pitch (v2 -- July 2026)}
 \fancyfoot[R]{\small\color{gray}\thepage}
 \renewcommand{\headrulewidth}{0pt}
 
@@ -33,7 +34,7 @@
 \maketitle
 
 \begin{tcolorbox}[colback=isazipink!6,colframe=isazipink,title=HOW TO USE THIS DOCUMENT,fonttitle=\bfseries]
-This is a standalone elevator pitch --- separate from the full presentation script and Q\&A prep. Use it whenever you have 30 seconds and no slides: a hallway conversation, a ``so what do you do'' moment, an intro before a longer demo. Three beats, in order: \textbf{Problem} $\to$ \textbf{Demo the solution} $\to$ \textbf{Close on the problem, in numbers}. Total spoken length is \textbf{78 words} (counted, not estimated) --- at a natural conversational pace ($\sim$150 words/minute) that's $\sim$31 seconds; a slightly brisker pace ($\sim$170 wpm, normal for an energised pitch) brings it to $\sim$27--28 seconds. \textbf{Rehearse it out loud with a timer before using it live} --- reading pace varies more than people expect, and this script is written to sit right at the 30-second mark either way.
+This is the updated elevator pitch, revised to reflect the two major capabilities added in July 2026: the \textbf{update-approval gate} (Sam mentions a fact about a contact; Alex approves or ignores it before the database changes) and the \textbf{named-contact lookup} (``Do you know Kara Davis? Can I get her details?''). The core three-beat structure is unchanged: \textbf{Problem} $\to$ \textbf{Demo the solution} $\to$ \textbf{Close on the problem, in numbers}. Beat 2 now carries both the search-and-draft story and the self-updating network story --- they land as a single, richer capability rather than two features bolted together. Total spoken length is \textbf{81 words} ($\sim$32 seconds at a natural 150 wpm; $\sim$29 seconds at a brisker 170 wpm). \textbf{Rehearse out loud with a timer.}
 \end{tcolorbox}
 
 \section{The structure, at a glance}
@@ -44,7 +45,7 @@ This is a standalone elevator pitch --- separate from the full presentation scri
 Beat & Time & Words & Job \\
 \midrule
 1. Problem & $\sim$11s & 27 & Make them feel it in one concrete moment, not an abstract claim \\
-2. Demo the solution & $\sim$13s & 33 & Show what the system \emph{does}, narrated as if it's happening live \\
+2. Demo the solution & $\sim$14s & 36 & Show \emph{both} capabilities: contact search + self-updating network \\
 3. Close on the problem & $\sim$7s & 18 & Restate the problem, now solved --- in a number, naming who benefits \\
 \bottomrule
 \end{tabular}
@@ -57,31 +58,31 @@ Beat & Time & Words & Job \\
 \end{scriptbox}
 
 \begin{notebox}
-This is the same hook used in the full presentation script (Section 1 of \emph{AI\_Middleman\_Presentation\_Prep.tex}), compressed to one breath. It works because it's a scene, not a statistic --- the listener pictures their own phone. Don't generalise it (``professionals often struggle to\ldots'') --- the specificity is what makes it land in 10 seconds.
+Unchanged from v1 --- it still works because it's a scene, not a statistic. The listener pictures their own phone. Don't generalise it. This beat hasn't changed because the problem hasn't changed.
 \end{notebox}
 
 \section{Beat 2 --- Demo the Solution}
 
 \begin{scriptbox}
-``Watch. The message comes in --- AI Middleman searches fifty thousand contacts, drafts the intro in Alex's own voice, sends it to Alex --- one tap to approve, and it's out in seconds.''
+``Watch. Message comes in --- fifty thousand contacts searched, a draft in Alex's own voice, one tap to send. And when Sam mentions someone moved companies, Alex gets a single confirm button --- the network stays current by itself.''
 \end{scriptbox}
 
 \begin{actionbox}
-If you have the app open: actually send the message as ``Sam'' right as you say ``Watch,'' and let the live pipeline stepper do the visual work while you talk over it --- the lit-up nodes (searching $\to$ drafting $\to$ waiting on Alex) are more convincing than any slide. If you don't have it open, this line still works spoken alone; say it as if you're describing something happening in front of you, not reciting a feature list.
+If you have the app open, send the Beat-1 message as Sam right as you say ``Watch'' --- the 11-stage live pipeline stepper lights up in real time (received $\to$ checking $\to$ AI intent $\to$ matching $\to$ drafting $\to$ waiting on Alex) and does the visual work while you talk over it. For the second half of this beat (the network-update angle), send the update message: \textit{``Kara Davis left Andreessen Horowitz, she's at Bain Capital now''} --- Alex's phone shows a two-button \textbf{Update / Ignore} prompt; one tap and the database changes live on screen. That's the moment: the network maintains itself in the same conversation, no data-entry step, Alex stays in control.
 \end{actionbox}
 
 \begin{notebox}
-Three things this line does deliberately: (1) ``fifty thousand contacts'' gives the scale a number, not a vague ``his whole network''; (2) ``in Alex's own voice'' signals this isn't a generic auto-reply; (3) ``one tap to approve'' plants the human-in-the-loop safety point without spending a separate sentence on it --- you don't have time to explain \emph{why} approval matters in a 30-second pitch, so just show that it exists.
+Four things this beat does deliberately: (1) ``fifty thousand contacts'' gives scale a number; (2) ``in Alex's own voice'' signals this isn't a generic auto-reply --- the LLM drafts differently each time; (3) ``one tap to send'' keeps the human-in-the-loop point without spending a sentence on why it matters; (4) ``the network stays current by itself'' is the new hook --- it reframes the product from a search tool to a self-maintaining relationship graph that Alex controls. Do not say ``the AI updates the database'' --- that sounds autonomous and raises trust concerns. \emph{Alex} approves the update; say so if asked.
 \end{notebox}
 
 \section{Beat 3 --- Close on the Problem (with the number)}
 
 \begin{scriptbox}
-``That's an evening of digging turned into a ten-second tap --- giving every well-connected professional their time back.''
+``That's an evening of digging turned into a ten-second tap --- for every well-connected professional who's tired of being their own CRM.''
 \end{scriptbox}
 
 \begin{notebox}
-This is the beat the user specifically asked for: \textbf{end back on the problem statement, with the time saved for the target market named explicitly.} ``An evening'' (Beat 1's cost) collapses into ``a ten-second tap'' (the actual interaction time to approve a draft) --- that contrast \emph{is} the pitch. ``Every well-connected professional'' names the target market plainly: not ``users,'' not ``people like Alex'' --- the actual buyer persona, so a listener with that exact problem self-identifies immediately.
+Updated from v1's close (``giving every well-connected professional their time back'') to add ``tired of being their own CRM'' --- this phrase lands harder now that the self-updating network is part of Beat 2. It names the exact frustration that makes the update-gate feature click: the connector already spends time maintaining contacts manually; this takes it off their plate. Don't rush this line --- slow down on ``tired of being their own CRM'' so it sticks.
 \end{notebox}
 
 \section{The full script, back to back}
@@ -90,27 +91,43 @@ This is the beat the user specifically asked for: \textbf{end back on the proble
 \itshape
 ``A friend texts you: `know a good lawyer in London?' The person's in your network somewhere --- but finding them, and writing the intro, eats your evening.
 
-Watch. The message comes in --- AI Middleman searches fifty thousand contacts, drafts the intro in Alex's own voice, sends it to Alex --- one tap to approve, and it's out in seconds.
+Watch. Message comes in --- fifty thousand contacts searched, a draft in Alex's own voice, one tap to send. And when Sam mentions someone moved companies, Alex gets a single confirm button --- the network stays current by itself.
 
-That's an evening of digging turned into a ten-second tap --- giving every well-connected professional their time back.''
+That's an evening of digging turned into a ten-second tap --- for every well-connected professional who's tired of being their own CRM.''
 \end{tcolorbox}
 
 \section{If you're running long --- the 15-second cut}
 
-For a genuinely tight window (someone else is about to talk, you're being introduced mid-sentence), drop straight to problem $\to$ close, skip the demo narration entirely:
+For a genuinely tight window, drop straight to problem $\to$ close, skip the demo narration:
 
 \begin{scriptbox}
-``Networking pros lose an evening every time a friend asks for an intro --- digging through contacts, writing it up by hand. AI Middleman turns that into a ten-second approval on WhatsApp.''
+``Networking pros lose an evening every time a friend asks for an intro --- and another hour keeping contacts up to date. AI Middleman turns both into a ten-second tap on WhatsApp.''
 \end{scriptbox}
 
-Use this only as a true fallback --- it loses the demo beat entirely, and the demo is what makes people lean in. Prefer the full 30-second version whenever you have the time.
+Use only as a true fallback --- it loses the demo beat entirely, and the demo is what makes people lean in. The update angle in this cut (``keeping contacts up to date'') earns its one extra phrase because it signals the product is broader than a search widget.
 
 \section{What NOT to do in 30 seconds}
 \begin{itemize}
-    \item Don't mention the tech stack, the model, or Groq --- there's no time, and it's not what sells the idea. Save it for the follow-up question.
-    \item Don't hedge (``it's still a prototype, but\ldots'') inside the pitch itself --- confidence here, honesty later if asked. The full Q\&A prep (Section~7 of the main presentation doc) is where the honest 6.5/10 self-assessment lives; it would undercut a 30-second hook.
-    \item Don't explain the two-stage retrieval architecture. If someone asks ``how does it actually search 50,000 contacts,'' that's a great follow-up question --- let them ask it, don't pre-empt it.
-    \item Don't rush the close. The last line is the one that gets remembered --- slow down slightly on ``giving every well-connected professional their time back'' rather than speeding up to fit the clock.
+    \item Don't mention the tech stack, Groq, Featherless, or the two-stage retrieval architecture --- save those for follow-up questions.
+    \item Don't say ``the AI updates the database'' --- say ``Alex approves the update'' or ``one confirm button.'' The human-in-the-loop framing is a feature, not an asterisk; lead with it.
+    \item Don't explain the 11-stage pipeline by name --- the live stepper on screen does that visually; your words should narrate the \emph{outcome}, not the mechanism.
+    \item Don't hedge (``it's still a prototype, but\ldots'') inside the pitch. Confidence here, honesty later if asked.
+    \item Don't rush the close. ``Tired of being their own CRM'' is the line that gets remembered --- slow down slightly rather than speeding up to fit the clock.
+    \item Don't mention the phrasing constraint for updates (declarative ``X left Y'' works; ``can you update X'' is misclassified). That's an engineering limitation you fix, not a talking point.
 \end{itemize}
+
+\section{The five-beat demo, expanded (for a 2-minute window)}
+
+If you have two minutes instead of thirty seconds, the pitch opens exactly the same way but the demo beat expands into a live walkthrough of all five demo messages:
+
+\begin{enumerate}
+    \item \textbf{Contact search} --- ``Hey, need someone in private equity in Joburg --- senior level, MD or Partner.'' Pipeline lights up; Alex gets a draft with 2--3 names; taps Send.
+    \item \textbf{Follow-up pick} --- ``Connect me with the first one'' or ``Send me their details.'' Alex approves contact details (phone/email) before they go out.
+    \item \textbf{Voice note} (optional) --- Record a 5-second voice note instead of typing. Same pipeline, Groq transcribes, same result --- shows multi-modal input.
+    \item \textbf{Network update} --- ``Kara Davis left Andreessen Horowitz, she's at Bain Capital now.'' Alex sees \textbf{Update / Ignore} buttons; taps Update. DB changes live.
+    \item \textbf{Named lookup} --- ``Do you know Kara Davis? Can I get her details?'' System returns the \emph{updated} company (Bain Capital, not Andreessen) --- proving the update landed.
+\end{enumerate}
+
+Beats 4 and 5 together are the moment that lifts this above ``smart search'': the network is a \emph{living} thing that gets more accurate every time Alex's friends share news, with Alex always in the loop.
 
 \end{document}

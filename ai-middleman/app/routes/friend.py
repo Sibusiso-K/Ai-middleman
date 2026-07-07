@@ -241,7 +241,10 @@ async def _handle_followup_selection(db_pool, thread_id: int, text: str, whatsap
 
     emit("checking", "🔍 Sam is picking from the people we suggested")
 
-    # Look up real contact details for each selected person.
+    # Look up real contact details for each selected person. Fetch title and
+    # company fresh from the DB so that a contact who was updated since the
+    # last draft suggestion shows the current employer, not the stale one
+    # stored in the match-stub event payload.
     picked = []
     async with db_pool.acquire() as conn:
         for m in selected:
@@ -249,7 +252,7 @@ async def _handle_followup_selection(db_pool, thread_id: int, text: str, whatsap
             if not cid:
                 continue
             c = await conn.fetchrow(
-                "SELECT full_name, phone, email FROM contacts WHERE id = $1", cid
+                "SELECT full_name, title, company, phone, email FROM contacts WHERE id = $1", cid
             )
             if not c or not (c["phone"] or c["email"]):
                 continue
@@ -258,7 +261,14 @@ async def _handle_followup_selection(db_pool, thread_id: int, text: str, whatsap
                 f"📧 {c['email']}" if c["email"] else None,
             ]))
             first = c["full_name"].split()[0] if c["full_name"] else "them"
-            picked.append({"match": m, "full_name": c["full_name"], "first": first, "details": details})
+            picked.append({
+                "match": m,
+                "full_name": c["full_name"],
+                "first": first,
+                "details": details,
+                "title": c["title"],
+                "company": c["company"],
+            })
 
     if not picked:
         return False  # couldn't resolve any real details — let the pipeline try
@@ -266,7 +276,7 @@ async def _handle_followup_selection(db_pool, thread_id: int, text: str, whatsap
     generator = DraftGenerator()
     contacts_for_draft = [
         {"full_name": p["full_name"], "details_str": p["details"],
-         "title": p["match"].get("title"), "company": p["match"].get("company")}
+         "title": p["title"], "company": p["company"]}
         for p in picked
     ]
     draft = await generator.generate_details_draft(contacts_for_draft)
