@@ -181,6 +181,11 @@ Sound genuine, personal, and confident."""
                         draft = _strip_wrapping_quotes(draft)
                         slog(f"[Draft/{config['name']}] Generated (attempt {attempt}): {draft[:100]}...")
                         return draft
+                    # Rate-limited with a fallback provider available — skip this
+                    # hot provider's remaining retries and try the next one.
+                    if response.status_code == 429 and config is not self.configs[-1]:
+                        slog(f"[Draft/{config['name']}] rate-limited (429) — switching to next provider")
+                        break
                     # Retry rate-limits / server errors; give up on other 4xx.
                     slog(f"[Draft/{config['name']}] API error {response.status_code} (attempt {attempt}/{self.max_attempts})")
                     if response.status_code < 500 and response.status_code != 429:

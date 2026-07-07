@@ -82,6 +82,12 @@ class LLMAgent:
                         except json.JSONDecodeError as e:
                             # Malformed / non-JSON reply — retry (transient LLM behaviour).
                             slog(f"[Agent/{config['name']}] unparseable reply (attempt {attempt}/{self.max_retries}): {e}")
+                    elif response.status_code == 429 and config is not self.configs[-1]:
+                        # Rate-limited and we have a fallback provider — don't burn
+                        # the remaining retries on this hot provider, jump straight
+                        # to the next one (which isn't rate-limited).
+                        slog(f"[Agent/{config['name']}] rate-limited (429) — switching to next provider")
+                        break
                     elif response.status_code == 429 or response.status_code >= 500:
                         slog(f"[Agent/{config['name']}] retryable HTTP {response.status_code} (attempt {attempt}/{self.max_retries})")
                     else:
@@ -94,7 +100,7 @@ class LLMAgent:
                 if attempt < self.max_retries:
                     await asyncio.sleep(self._backoff_for(config) * attempt)
 
-            slog(f"[Agent] {config['name']} exhausted after {self.max_retries} attempts — trying next provider" if config is not self.configs[-1] else f"[Agent] {config['name']} exhausted — no more providers to try")
+            slog(f"[Agent] {config['name']} done — trying next provider" if config is not self.configs[-1] else f"[Agent] {config['name']} done — no more providers to try")
 
         return self._fallback_response()
 

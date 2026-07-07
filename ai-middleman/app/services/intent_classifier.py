@@ -171,6 +171,12 @@ Reply with ONLY this exact JSON shape, nothing else — no markdown, no explanat
                             # Malformed / non-JSON reply — retry (transient LLM behaviour).
                             last_error = f"unparseable reply: {e}"
                             slog(f"[Intent/{config['name']}] unparseable reply (attempt {attempt}/{self.max_attempts}): {e}")
+                    elif response.status_code == 429 and config is not self.configs[-1]:
+                        # Rate-limited and a fallback provider exists — skip this
+                        # hot provider's remaining retries and try the next one.
+                        last_error = "HTTP 429"
+                        slog(f"[Intent/{config['name']}] rate-limited (429) — switching to next provider")
+                        break
                     else:
                         # Retry server-side/rate-limit errors; give up on other 4xx.
                         last_error = f"HTTP {response.status_code}"
