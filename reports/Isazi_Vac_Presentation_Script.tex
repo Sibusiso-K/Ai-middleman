@@ -1,0 +1,246 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{fancyhdr}
+\usepackage{tcolorbox}
+\tcbuselibrary{skins}
+
+\definecolor{isaziteal}{HTML}{2AB6C4}
+\definecolor{isazipink}{HTML}{C7327A}
+\definecolor{isaziorange}{HTML}{F0803C}
+\definecolor{isazigold}{HTML}{F0B429}
+
+\titleformat{\section}{\Large\bfseries\color{isazipink}}{Slide \thesection}{0.6em}{}
+\titleformat{\subsection}{\normalsize\bfseries\color{isaziteal}}{}{0em}{}
+
+\newtcolorbox{visual}{colback=isaziteal!8,colframe=isaziteal,fonttitle=\bfseries,title=VISUAL / CANVA DIRECTION,boxrule=0.8pt,arc=2pt}
+\newtcolorbox{scriptbox}{colback=gray!5,colframe=gray!40,fonttitle=\bfseries,title=WHAT I SAY (script),boxrule=0.6pt,arc=2pt}
+\newtcolorbox{onslide}{colback=isazigold!10,colframe=isaziorange,fonttitle=\bfseries,title=ON-SLIDE TEXT (keep it this short),boxrule=0.8pt,arc=2pt}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot[C]{\small\color{gray}Sibusiso Khumalo -- Isazi Vac Program Presentation}
+\fancyfoot[R]{\small\color{gray}\thepage}
+\renewcommand{\headrulewidth}{0pt}
+
+\title{\color{isazipink}\Huge Isazi Vac Program\\\Large Presentation Script}
+\author{Sibusiso Khumalo}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{tcolorbox}[colback=isazipink!6,colframe=isazipink,title=HOW TO USE THIS DOCUMENT,fonttitle=\bfseries]
+This is your talking script, organized to match Isazi's 7-slide vac-program template exactly.
+For each slide you get three things: the \textbf{on-slide text} (short -- this is all that
+should appear in Canva), the \textbf{visual direction} (what to actually design), and
+\textbf{what I say} (your spoken script, delivered from memory, not read off the slide).
+Rule of thumb: if a sentence is in the "what I say" box, it does NOT belong on the slide.
+\end{tcolorbox}
+
+% ---------------------------------------------------------------
+\section{Identity}
+
+\begin{onslide}
+Sibusiso Khumalo\\
+Clinical Medicine $\rightarrow$ Electrical Engineering $\rightarrow$ Isazi.ai\\
+\textit{Still exploring where I fit in tech}
+\end{onslide}
+
+\begin{visual}
+Full-bleed photo of you, left third of the slide. Right two-thirds: a simple horizontal
+timeline/arrow graphic with three icons -- a stethoscope, a circuit/resistor symbol, and
+the Isazi logo dot-mark -- connected by an arrow flowing left to right. Use Isazi's
+gradient (teal $\to$ pink $\to$ orange $\to$ gold) as the arrow's color, echoing the logo.
+Keep text minimal; the timeline graphic tells the story.
+\end{visual}
+
+\begin{scriptbox}
+Hi everyone, I'm Sibusiso Khumalo. My path here has not been a straight line, and I think
+that's actually the point. I started out studying clinical medical practice -- I wanted
+to help people directly, one on one. What that degree really gave me was something I
+didn't expect: a deep education in reading people, listening carefully, and communicating
+under pressure. Those are human-interaction skills, not technical ones, but they turn out
+to matter enormously in engineering too. I then made the switch to electrical engineering,
+because I realized what I actually loved wasn't medicine specifically -- it was solving
+hard, structured problems. I landed at Isazi almost by accident, through a hackathon,
+and I stayed because of the culture: this is a place that incubates problem-solvers,
+not just people who already have all the answers. I'm still figuring out exactly where
+I fit in tech long-term, and that's what this month was about.
+\end{scriptbox}
+
+% ---------------------------------------------------------------
+\section{Why Electrical Engineering, and Why Isazi}
+
+\begin{onslide}
+From bedside skills to circuit boards\\
+Same instinct: understand the system, find what's broken, fix it
+\end{onslide}
+
+\begin{visual}
+Split-panel slide, two halves separated by a thin gradient line. Left half: a soft
+illustration/icon of a doctor's stethoscope with a small "listening / empathy" motif.
+Right half: a circuit-board or PCB icon. In the middle, overlapping, a single lightbulb
+or magnifying-glass icon to represent the shared thread: problem-solving. Very little
+text -- let the icon pairing do the talking.
+\end{visual}
+
+\begin{scriptbox}
+What drew me to electrical engineering was realizing that medicine had taught me how to
+diagnose problems in people, and engineering let me diagnose problems in systems --
+same muscle, different subject matter. I wanted to test that in the real world, not just
+in a classroom, and Isazi was the obvious place to do that: it's a company that builds
+real AI products for real businesses, under real constraints, not toy problems. I wanted
+one month where the thing I built either worked in production or it didn't -- no
+in-between, no simulated grading. That's what pulled me here specifically, over a
+more conventional internship.
+\end{scriptbox}
+
+% ---------------------------------------------------------------
+\section{Problem Statement}
+
+\begin{onslide}
+Well-connected people are sitting on gold mines of contacts\\
+they don't have time to open.
+\end{onslide}
+
+\begin{visual}
+A single bold stat as the hero visual: something like ``50{,}000+ contacts. 0 minutes to
+spare.'' rendered huge, center-screen, in the Isazi gradient. Underneath, a small
+supporting icon row: a clock, a WhatsApp bubble, and a tangled-network icon. This slide
+should feel like a punch, not a paragraph -- one number, one line, done.
+\end{visual}
+
+\begin{scriptbox}
+Here's the problem. Think about any well-connected professional -- a senior banker, an
+investor, a partner at a firm. Over a career they build up a network of thousands of
+real, high-value contacts. Constantly, friends and colleagues text them: ``hey, do you
+know a good corporate lawyer in London?'', ``can you connect me with someone in private
+equity?''. Each one of those messages is small on its own. But multiply it by dozens of
+requests a week, and the real cost isn't goodwill -- it's time. Every request means
+stopping what you're doing, mentally scanning your network, remembering who's relevant,
+writing a warm, personal introduction, and doing it in a way that doesn't damage the
+relationship on either side. For someone whose time is worth the most, that's exactly
+the task they can least afford to do manually, and exactly the task nobody has properly
+automated -- because it needs judgment, not just a search bar. That's the gap I built
+into: give that person back their time, without losing the personal touch that makes
+an introduction actually work.
+\end{scriptbox}
+
+% ---------------------------------------------------------------
+\section{Project -- The Elevator Pitch}
+
+\begin{onslide}
+AI Middleman: your WhatsApp, minus the busywork.\\
+\textit{[Live demo follows]}
+\end{onslide}
+
+\begin{visual}
+Three-step horizontal flow diagram, icon-driven: (1) WhatsApp message bubble in $\to$
+(2) a small "brain / gears" icon labeled AI $\to$ (3) an approve/checkmark icon out to a
+second WhatsApp bubble. Keep the whole diagram to icons plus 2--3 word labels
+(``Friend asks'', ``AI matches \& drafts'', ``You approve''). No paragraphs. This is the
+slide where you switch to the live demo, so leave room at the bottom for a
+``Watch this live $\to$'' cue.
+\end{visual}
+
+\begin{scriptbox}
+In thirty seconds: AI Middleman is a system that sits inside WhatsApp and does the
+matching and drafting work for you. A friend texts a request in plain language -- in
+English or Afrikaans, typos and all. The system figures out whether it's actually a
+contact request, works out who in the network is the best fit using a two-stage
+AI pipeline, writes a warm introduction in your own voice, and only then hands it to you
+to approve, edit, or skip with one tap. You stay fully in control of every introduction
+that goes out -- the AI never sends anything without you. Let me just show you, live.
+\textbf{[switch to live demo here]}
+\end{scriptbox}
+
+% ---------------------------------------------------------------
+\section{What I Learned}
+
+\begin{onslide}
+Technical: production AI is a pipeline, not a prompt.\\
+Human: the fastest way to unblock yourself is to ask.
+\end{onslide}
+
+\begin{visual}
+Two stacked cards/icons side by side, labeled ``Technical'' and ``Human''. Technical card:
+a small pipeline/funnel icon (representing the keyword-filter $\to$ LLM-match $\to$
+draft stages). Human card: a speech-bubble/question-mark icon. Keep each card to a
+single short phrase; let the icons carry the visual weight.
+\end{visual}
+
+\begin{scriptbox}
+Technically, the biggest lesson was that a single clever prompt is never enough for a
+real product -- you need a pipeline. I ended up with a two-stage matching system: a
+cheap, deterministic keyword filter that narrows tens of thousands of contacts down to a
+shortlist, and only then a more expensive LLM call to actually rank and reason about
+that shortlist. That split is what makes the system fast and cheap enough to run on
+every message, instead of an expensive model call trying to search the entire dataset
+every time. On the human side, the real takeaway was about asking for help early. It's
+tempting to sit with a bug for hours because you feel like you should be able to solve
+it yourself -- but the fastest debugging tool here was always another person's fresh
+eyes, and the culture at Isazi actively rewards asking rather than quietly struggling.
+That's a mindset shift, not a technical one, but it's the one I'll keep using longest.
+\end{scriptbox}
+
+% ---------------------------------------------------------------
+\section{What Got Stuck}
+
+\begin{onslide}
+The AI kept mixing up isiZulu and Afrikaans.\\
+Honest fix: a hard rule beats a hopeful prompt.
+\end{onslide}
+
+\begin{visual}
+A ``before / after'' two-column visual. Left column (red-tinted): a WhatsApp bubble
+showing a garbled/wrong-language reply, small "X" icon. Right column (green-tinted):
+the same request with a correct reply, small checkmark icon. This is your most authentic,
+memorable slide -- let the visual literally show the bug and the fix, no abstract icons.
+\end{visual}
+
+\begin{scriptbox}
+I want to be honest about something that genuinely broke. I'd restricted the system's
+language detection to English and Afrikaans, because a broader multi-language attempt
+was unreliable and I didn't want to embarrass myself or the friend messaging in
+during the actual demo. But that fix introduced a new bug: because Afrikaans became the
+only non-English option, the AI started force-fitting real isiZulu messages into
+``Afrikaans'' too, since to a small model, both just look like ``not English.'' I only
+caught this by actually reading through live conversation logs, not by assuming things
+were fine. The fix wasn't a smarter prompt -- it was a deterministic rule: a short list
+of words and prefixes that only ever appear in isiZulu, checked in code, that overrides
+the AI's guess whenever it's about to get it wrong. The lesson I'm taking from this is
+that when correctness really matters, you don't ask the model to be careful -- you build
+a hard backstop around it.
+\end{scriptbox}
+
+% ---------------------------------------------------------------
+\section{Thank You}
+
+\begin{onslide}
+Thank you.
+\end{onslide}
+
+\begin{visual}
+Minimal, warm closing slide. Isazi logo centered, small, on a clean background (use the
+dark logo variant if the room lights are dimmed, light variant otherwise). Just the
+words ``Thank you'' beneath it, generous white space. No bullet points, no clutter --
+this slide should feel like a breath, not more information.
+\end{visual}
+
+\begin{scriptbox}
+Thank you -- genuinely. This month gave me something I didn't expect: proof that I can
+take an idea, ship it, break it in front of real people, and fix it, all in a few weeks.
+\textit{[Personalize by name here: thank the specific mentor(s) who reviewed your code
+or unblocked you, the person who answered your questions when you were stuck on the
+language bug or the matching pipeline, and anyone who made you feel like asking
+"dumb" questions was safe. Say their names. Be specific about one moment they helped --
+that specificity is what makes a thank-you land instead of sounding generic.]}
+I'm walking away from this program with a real product, a lot of new judgment about
+what "production-ready" actually means, and a much clearer sense of where I want to
+grow next. Thank you for the month, and thank you for the space to figure this out.
+\end{scriptbox}
+
+\end{document}
