@@ -21,6 +21,7 @@ Exposed: apply_update(db_pool, update_target, changed_by, source_message) -> str
 import os
 from typing import Optional
 from app.log_safe import slog
+from app.services.contact_lookup import resolve_contact_by_name
 
 # Attribute names the LLM can return → actual columns in the contacts table.
 _ALLOWED_ATTRIBUTES: dict[str, str] = {
@@ -60,31 +61,7 @@ async def _resolve_contact(conn, contact_name: Optional[str]) -> Optional[dict]:
             slog(f"[Update] self-update requested but FRIEND_CONTACT_ID={FRIEND_CONTACT_ID!r} not found in DB")
         return dict(row) if row else None
 
-    # Fuzzy name match: tokenise the name, require all tokens to appear in
-    # full_name (case-insensitive). If multiple rows match, pick the one whose
-    # name most closely matches token count (closest to an exact match).
-    name = contact_name.strip()
-    tokens = [t for t in name.lower().split() if len(t) >= 2]
-    if not tokens:
-        return None
-
-    # Build a WHERE clause: each token must appear somewhere in lower(full_name).
-    conditions = " AND ".join(
-        f"LOWER(full_name) LIKE ${ i + 1 }" for i in range(len(tokens))
-    )
-    params = [f"%{t}%" for t in tokens]
-    rows = await conn.fetch(
-        f"SELECT id, full_name FROM contacts WHERE {conditions} LIMIT 5",
-        *params,
-    )
-    if not rows:
-        slog(f"[Update] no contact found matching name {name!r}")
-        return None
-
-    # Prefer the row whose tokenised name length is closest to the query.
-    best = min(rows, key=lambda r: abs(len(r["full_name"].split()) - len(tokens)))
-    slog(f"[Update] resolved {name!r} → {best['full_name']!r} (id={best['id']})")
-    return dict(best)
+    return await resolve_contact_by_name(conn, contact_name.strip())
 
 
 async def apply_update(

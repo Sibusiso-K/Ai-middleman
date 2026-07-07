@@ -38,7 +38,8 @@
     {"query": "Recruiting partner in Tel Aviv", "expected_sector": "Recruiting/Other", "expected_location_contains": "Tel Aviv", "_note": "unseen combo - generalization check"},
     {"query": "Someone in Johannesburg who does corporate law", "expected_location_contains": null, "_note": "Johannesburg isn't in the seed dataset - correct behavior is an honest low-confidence/no-match, NOT a hallucinated JHB contact"},
     {"query": "Any private equity partners in Dubai I should meet?", "expected_sector": "Finance", "expected_location_contains": "Dubai", "_note": "regression: after stopword+relevance-ranking fix, Stage 1 must surface PE/Finance in Dubai, not random Dubai contacts"},
-    {"query": "Do you know any energy investors in Amsterdam?", "expected_sector": "Energy", "expected_location_contains": "Amsterdam", "_note": "regression: must surface Energy partners in Amsterdam, not London tech people"}
+    {"query": "Do you know any energy investors in Amsterdam?", "expected_sector": "Energy", "expected_location_contains": "Amsterdam", "_note": "regression: must surface Energy partners in Amsterdam, not London tech people"},
+    {"query": "Do you know anyone from JPMorgan in a senior position?", "expected_company_contains": "JP Morgan", "_note": "regression: 'JPMorgan' (no space) must still match 'JP Morgan' (DB spelling) and rank Partner/MD/Director above Analyst/Associate"}
   ],
 
   "followup": {
@@ -65,6 +66,38 @@
       {"text": "connect me with all of em", "expected": ["John Hall", "Sally Meyer", "David Cohen"]},
       {"text": "okay acount with them please", "expected": ["John Hall", "Sally Meyer", "David Cohen"]},
       {"text": "are they any good?", "expected": []}
+    ]
+  },
+
+  "update_intent": {
+    "_note": "Tests is_update detection by IntentClassifier. Checks: (a) real updates are detected, (b) the right attribute is extracted, (c) contact requests and chit-chat are NOT flagged as updates.",
+    "cases": [
+      {"text": "I heard Aaron Acosta works at Deloitte now", "expected_is_update": true, "expected_attribute": "company", "expected_contact": "Aaron Acosta"},
+      {"text": "Sarah left McKinsey, she's at BCG now", "expected_is_update": true, "expected_attribute": "company", "expected_contact": "Sarah"},
+      {"text": "Thabo got promoted to Managing Director", "expected_is_update": true, "expected_attribute": "title", "expected_contact": "Thabo"},
+      {"text": "I moved to Yoco, not Takealot anymore", "expected_is_update": true, "expected_attribute": "company", "expected_contact": null},
+      {"text": "My email changed to sam@yoco.com", "expected_is_update": true, "expected_attribute": "email", "expected_contact": null},
+      {"text": "My new number is 082 555 1234", "expected_is_update": true, "expected_attribute": "phone", "expected_contact": null},
+      {"text": "David Chen is now based in Singapore", "expected_is_update": true, "expected_attribute": "location", "expected_contact": "David Chen"},
+      {"text": "I actually work at Yoco now", "expected_is_update": true, "expected_attribute": "company", "expected_contact": null},
+      {"text": "Do you know any good lawyers in London?", "expected_is_update": false},
+      {"text": "Can you connect me with someone in private equity?", "expected_is_update": false},
+      {"text": "Hey how are you doing?", "expected_is_update": false},
+      {"text": "Thanks for yesterday", "expected_is_update": false},
+      {"text": "Are we still on for dinner?", "expected_is_update": false}
+    ]
+  },
+
+  "named_contact_intent": {
+    "_note": "Tests named_contact extraction: is_request=true messages asking about ONE specific person by name must extract that name; role/company/sector searches must leave it null even though is_request is still true.",
+    "cases": [
+      {"text": "Do you know Aaron Aguirre? Do you have his details?", "expected_named_contact": "Aaron Aguirre"},
+      {"text": "Do you have Sarah Chen's number?", "expected_named_contact": "Sarah Chen"},
+      {"text": "Is David Cohen still someone you know?", "expected_named_contact": "David Cohen"},
+      {"text": "Do you know any good lawyers in London?", "expected_named_contact": null},
+      {"text": "Do you know anyone from JPMorgan in a senior position?", "expected_named_contact": null},
+      {"text": "Can you connect me with someone in private equity?", "expected_named_contact": null},
+      {"text": "I need a CFO for my startup, anyone come to mind?", "expected_named_contact": null}
     ]
   },
 

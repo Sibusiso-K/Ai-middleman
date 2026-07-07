@@ -183,6 +183,95 @@ def run_followup_eval(section: dict) -> dict:
     return {"rows": rows, "passed": passed, "total": total}
 
 
+async def run_update_intent_eval(cases: list) -> dict:
+    print()
+    print("=" * 70)
+    print("UPDATE INTENT DETECTION")
+    print("=" * 70)
+
+    classifier = IntentClassifier()
+    passed = errors = 0
+    rows = []
+    for case in cases:
+        text = case["text"]
+        expected_is_update = case["expected_is_update"]
+        expected_attribute = case.get("expected_attribute")
+        expected_contact = case.get("expected_contact", "__absent__")
+        try:
+            result = await classifier.classify(text)
+        except IntentClassificationError as e:
+            errors += 1
+            rows.append((text, expected_is_update, None, None, f"ERROR: {e}"))
+            print(f"  [ERR ] {text!r} -> classifier unreachable: {e}")
+            continue
+
+        got_is_update = result.get("is_update", False)
+        update_target = result.get("update_target") or {}
+        got_attribute = update_target.get("attribute")
+        got_contact = update_target.get("contact_name")
+
+        ok = got_is_update == expected_is_update
+        attr_ok = True
+        if expected_is_update and expected_attribute:
+            attr_ok = (got_attribute or "").lower() == expected_attribute.lower()
+            ok = ok and attr_ok
+
+        mark = "PASS" if ok else "FAIL"
+        passed += ok
+        rows.append((text, expected_is_update, got_is_update, got_attribute, mark))
+        detail = f"attribute={got_attribute!r}" if got_is_update else ""
+        contact_detail = f" contact={got_contact!r}" if got_is_update else ""
+        print(f"  [{mark}] expected_update={expected_is_update!s:<5} got={got_is_update!s:<5}  {detail}{contact_detail} — {text!r}")
+        if not attr_ok:
+            print(f"         attribute mismatch: expected={expected_attribute!r} got={got_attribute!r}")
+
+    total = len(cases)
+    print()
+    print(f"  Update detection accuracy: {passed}/{total} ({passed/total:.1%}){' (' + str(errors) + ' errors)' if errors else ''}")
+    return {"rows": rows, "passed": passed, "total": total, "errors": errors}
+
+
+async def run_named_contact_eval(cases: list) -> dict:
+    print()
+    print("=" * 70)
+    print("NAMED CONTACT DETECTION")
+    print("=" * 70)
+
+    classifier = IntentClassifier()
+    passed = errors = 0
+    rows = []
+    for case in cases:
+        text = case["text"]
+        expected = case["expected_named_contact"]
+        try:
+            result = await classifier.classify(text)
+        except IntentClassificationError as e:
+            errors += 1
+            rows.append((text, expected, None, f"ERROR: {e}"))
+            print(f"  [ERR ] {text!r} -> classifier unreachable: {e}")
+            continue
+
+        got = result.get("named_contact")
+        # Loose match: if a name is expected, just check something was extracted
+        # containing at least the first token (model wording/casing may vary
+        # slightly) — not an exact-string requirement.
+        if expected is None:
+            ok = got is None
+        else:
+            first_token = expected.split()[0].lower()
+            ok = bool(got) and first_token in got.lower()
+
+        mark = "PASS" if ok else "FAIL"
+        passed += ok
+        rows.append((text, expected, got, mark))
+        print(f"  [{mark}] expected={expected!r:<20} got={got!r:<20} — {text!r}")
+
+    total = len(cases)
+    print()
+    print(f"  Named-contact accuracy: {passed}/{total} ({passed/total:.1%}){' (' + str(errors) + ' errors)' if errors else ''}")
+    return {"rows": rows, "passed": passed, "total": total, "errors": errors}
+
+
 def run_language_guard_eval(cases: list) -> dict:
     print()
     print("=" * 70)
@@ -253,10 +342,22 @@ async def main():
     matching_result = await run_matching_eval(eval_set["matching"])
     followup_result = run_followup_eval(eval_set["followup"])
     language_guard_result = run_language_guard_eval(eval_set["language_guard"]["cases"])
+    update_result = await run_update_intent_eval(eval_set["update_intent"]["cases"])
+    named_contact_result = await run_named_contact_eval(eval_set["named_contact_intent"]["cases"])
 
     write_report(intent_result, matching_result, followup_result, language_guard_result)
     print()
     print(f"Full report written to {REPORT_PATH}")
+    print()
+    print("=" * 70)
+    print(f"SUMMARY")
+    print("=" * 70)
+    print(f"  Intent classification:  {intent_result['accuracy']:.0%}")
+    print(f"  Matching relevance:     {matching_result['passed']}/{matching_result['total']} ({matching_result['passed']/matching_result['total']:.0%})")
+    print(f"  Follow-up selection:    {followup_result['passed']}/{followup_result['total']} ({followup_result['passed']/followup_result['total']:.0%})")
+    print(f"  Language guard:         {language_guard_result['passed']}/{language_guard_result['total']} ({language_guard_result['passed']/language_guard_result['total']:.0%})")
+    print(f"  Update detection:       {update_result['passed']}/{update_result['total']} ({update_result['passed']/update_result['total']:.0%})")
+    print(f"  Named contact:          {named_contact_result['passed']}/{named_contact_result['total']} ({named_contact_result['passed']/named_contact_result['total']:.0%})")
 
 
 if __name__ == "__main__":

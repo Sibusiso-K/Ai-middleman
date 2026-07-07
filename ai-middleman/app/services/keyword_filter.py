@@ -81,6 +81,23 @@ SECTOR_HINTS = {
     "banker": "finance", "banking": "finance", "hedge": "finance",
 }
 
+# Seniority words → the actual contacts.seniority values they mean. The
+# column never literally contains the word "senior" — real values are things
+# like "MD", "Partner", "Director", "Principal", "VP", "Associate", "Analyst"
+# — so a query like "anyone from JP Morgan in a senior position" needs this
+# mapping or the seniority signal never fires no matter which fields are
+# searched. Values are regex fragments matched against the seniority column.
+SENIORITY_HINTS = {
+    "senior": "MD|Partner|Director|Chairman|Principal|VP|Founder",
+    "seniority": "MD|Partner|Director|Chairman|Principal|VP|Founder",
+    "leadership": "MD|Partner|Director|Chairman|Founder",
+    "executive": "MD|Partner|Director|Chairman|Founder",
+    "exec": "MD|Partner|Director|Chairman|Founder",
+    "junior": "Analyst|Associate",
+    "entry-level": "Analyst",
+    "entry": "Analyst",
+}
+
 
 class KeywordFilter:
     def __init__(self, db_pool: asyncpg.Pool):
@@ -89,20 +106,24 @@ class KeywordFilter:
     # Fields that count toward relevance, with weights. Higher weight = stronger
     # signal that a match here means the contact really does what was asked.
     # looking_for / comment are intentionally excluded from scoring (low signal,
-    # often incidental) but stay in the WHERE clause for recall.
+    # often incidental) but stay in the WHERE clause for recall. seniority is
+    # its own column ("Junior"/"Senior"/"Partner"/"Director"...) — queries like
+    # "anyone from JPMorgan in a senior position" need it searched directly,
+    # since "senior" doesn't reliably appear inside title text.
     _RELEVANCE_FIELDS = [
         ("title", 3),
         ("expertise_tags", 2),
         ("can_help_with", 2),
         ("sector", 2),
         ("specialty", 2),
+        ("seniority", 2),
         ("company", 1),
         ("full_name", 1),
     ]
 
     # Fields searched to decide whether a row is a candidate at all (recall).
     _WHERE_FIELDS = [
-        "full_name", "title", "company", "sector", "specialty",
+        "full_name", "title", "company", "sector", "specialty", "seniority",
         "expertise_tags", "can_help_with", "looking_for", "comment",
     ]
 
@@ -150,16 +171,33 @@ class KeywordFilter:
         hint_sectors = sorted({SECTOR_HINTS[t] for t in tokens if t in SECTOR_HINTS})
         hint_pattern = "|".join(hint_sectors) if hint_sectors else None
 
-        sql, params = self._build_sql(kw_pattern, location_pattern, hint_pattern)
+        # Seniority hints from words like "senior"/"junior" (see SENIORITY_HINTS)
+        # — the seniority column never literally contains these words.
+        seniority_hints = sorted({SENIORITY_HINTS[t] for t in tokens if t in SENIORITY_HINTS})
+        seniority_pattern = "|".join(seniority_hints) if seniority_hints else None
+
+        sql, params = self._build_sql(kw_pattern, location_pattern, hint_pattern, seniority_pattern)
         async with self.db_pool.acquire() as conn:
             results = await conn.fetch(sql, *params)
         return [dict(row) for row in results]
 
-    def _build_sql(self, kw_pattern, location_pattern, hint_pattern=None):
+    @staticmethod
+    def _field_expr(field: str) -> str:
+        """SQL expression to compare a field against a keyword pattern.
+        Company gets spaces stripped before comparison so casual spellings
+        without spaces ("JPMorgan") still match the DB's spaced form
+        ("JP Morgan") — kw_pattern terms are always single, space-free tokens,
+        so this is a one-directional normalisation that's safe for every
+        other field to skip."""
+        if field == "company":
+            return "REPLACE(LOWER(company), ' ', '')"
+        return f"LOWER({field})"
+
+    def _build_sql(self, kw_pattern, location_pattern, hint_pattern=None, seniority_pattern=None):
         """Assemble the candidate query from whichever signals are present:
-        keyword terms, a location, a sector hint, or a mix. relevance_score is
-        always the primary sort so role/sector relevance wins over incidental
-        VIP status."""
+        keyword terms, a location, a sector hint, a seniority hint, or a mix.
+        relevance_score is always the primary sort so role/sector/seniority
+        relevance wins over incidental VIP status."""
         select_cols = (
             "id, contact_id, full_name, phone, email, company, title, "
             "sector, specialty, location, seniority, expertise_tags, "
@@ -167,7 +205,7 @@ class KeywordFilter:
             "how_alex_knows_them, is_vip, comment"
         )
         params = []
-        kw_idx = loc_idx = hint_idx = None
+        kw_idx = loc_idx = hint_idx = seniority_idx = None
         if kw_pattern is not None:
             params.append(kw_pattern)
             kw_idx = len(params)
@@ -177,20 +215,30 @@ class KeywordFilter:
         if hint_pattern is not None:
             params.append(hint_pattern)
             hint_idx = len(params)
+        if seniority_pattern is not None:
+            params.append(seniority_pattern)
+            seniority_idx = len(params)
 
         # relevance_score: weighted sum of high-signal keyword-field matches,
         # plus a sector-hint boost so the sector the query implies (e.g.
         # "lawyer" -> Legal) outranks a wrong-sector contact that merely shares
-        # a word ("corporate" in a healthcare "Corporate Dev" title).
+        # a word ("corporate" in a healthcare "Corporate Dev" title), plus a
+        # seniority-hint boost so "senior" actually favours MD/Partner/Director
+        # contacts (the column never contains that literal word — see
+        # SENIORITY_HINTS).
         relevance_terms = []
         if kw_idx is not None:
             relevance_terms += [
-                f"(CASE WHEN LOWER({field}) ~ ${kw_idx} THEN {weight} ELSE 0 END)"
+                f"(CASE WHEN {self._field_expr(field)} ~ ${kw_idx} THEN {weight} ELSE 0 END)"
                 for field, weight in self._RELEVANCE_FIELDS
             ]
         if hint_idx is not None:
             relevance_terms.append(
                 f"(CASE WHEN LOWER(sector) ~ ${hint_idx} THEN 4 ELSE 0 END)"
+            )
+        if seniority_idx is not None:
+            relevance_terms.append(
+                f"(CASE WHEN seniority ~* ${seniority_idx} THEN 3 ELSE 0 END)"
             )
         relevance_expr = " + ".join(relevance_terms) if relevance_terms else "0"
 
@@ -200,16 +248,19 @@ class KeywordFilter:
         )
 
         # WHERE: a row qualifies if it matches any searched field on the keyword
-        # pattern, is in the requested location, or is in the hinted sector.
+        # pattern, is in the requested location, is in the hinted sector, or is
+        # in the hinted seniority band.
         where_clauses = []
         if kw_idx is not None:
             where_clauses.append(
-                "(" + " OR ".join(f"LOWER({f}) ~ ${kw_idx}" for f in self._WHERE_FIELDS) + ")"
+                "(" + " OR ".join(f"{self._field_expr(f)} ~ ${kw_idx}" for f in self._WHERE_FIELDS) + ")"
             )
         if loc_idx is not None:
             where_clauses.append(f"LOWER(location) ~ ${loc_idx}")
         if hint_idx is not None:
             where_clauses.append(f"LOWER(sector) ~ ${hint_idx}")
+        if seniority_idx is not None:
+            where_clauses.append(f"seniority ~* ${seniority_idx}")
         where_sql = " OR ".join(where_clauses) if where_clauses else "TRUE"
 
         sql = f"""

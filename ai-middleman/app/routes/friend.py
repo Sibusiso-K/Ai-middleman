@@ -33,6 +33,7 @@ from app.services.draft_generator import DraftGenerator
 from app.services.conversation_manager import ConversationManager
 from app.services.whatsapp_client import WhatsAppClient
 from app.services.update_extractor import apply_update
+from app.services.contact_lookup import resolve_contact_by_name
 from app.services.pipeline_events import emit
 from app.log_safe import slog
 
@@ -264,6 +265,85 @@ async def _handle_followup_selection(db_pool, thread_id: int, text: str, whatsap
     return True
 
 
+async def _handle_named_contact_lookup(
+    db_pool, thread_id: int, text: str, whatsapp: "WhatsAppClient", named_contact: str
+) -> None:
+    """Handle a direct "do you know <Name>?" style request — a lookup by
+    identity, not by role/skill/sector. This is deliberately NOT run through
+    Stage 1/2 matching: that pipeline's LLM scoring is built entirely around
+    role/sector relevance and caps anything that isn't a role match below
+    0.5, so a real named contact would score low and get dropped even when
+    they're sitting right there in the database. Instead this does a direct
+    fuzzy name lookup and pushes Alex a Send/Skip-gated draft — same PII
+    discipline as _handle_followup_selection: phone/email are only included
+    in the draft text if Sam's message itself asked for details, otherwise
+    the draft just confirms the contact exists and offers to share more."""
+    manager = ConversationManager(db_pool)
+    emit("checking", f"🔍 Looking up {named_contact} directly")
+
+    async with db_pool.acquire() as conn:
+        contact = await resolve_contact_by_name(conn, named_contact)
+
+    if not contact:
+        draft = f"Hmm, I don't think I know a {named_contact} in my network — might be able to help with something else though!"
+        event_id = await manager.add_event(thread_id, "draft_suggested", {
+            "original_message": text,
+            "draft_reply": draft,
+            "matches": [],
+        })
+        buttons = [
+            {"type": "reply", "reply": {"id": f"send_{event_id}", "title": "✅ Send"}},
+            {"type": "reply", "reply": {"id": f"skip_{event_id}", "title": "❌ Skip"}},
+        ]
+        draft_body = (
+            f"🤖 *{FRIEND_NAME} asked about {named_contact}*\n\n"
+            f"*Draft:* {draft}\n\n"
+            f"Tap Send to use it as-is, or Skip to hold off."
+        )
+        await whatsapp.send_interactive_buttons(to=ALEX_NUMBER, body_text=draft_body, buttons=buttons)
+        emit("awaiting_approval", "📤 Sent to Alex for approval — waiting for Send/Skip")
+        return
+
+    full_name = contact["full_name"]
+    first = full_name.split()[0] if full_name else named_contact
+    role_bits = " / ".join(filter(None, [contact.get("title"), contact.get("company")]))
+    role_note = f" — {role_bits}" if role_bits else ""
+
+    wants_details = _looks_like_details_request(text)
+    if wants_details and (contact.get("phone") or contact.get("email")):
+        details = " / ".join(filter(None, [
+            f"📞 {contact['phone']}" if contact.get("phone") else None,
+            f"📧 {contact['email']}" if contact.get("email") else None,
+        ]))
+        draft = f"Yeah I know {first}{role_note} — {details}. Tell {first} I sent you 🤝"
+    else:
+        draft = f"Yeah I know {first}{role_note}. Want me to send you their details?"
+
+    match_stub = [{
+        "contact_id": contact["id"],
+        "name": full_name,
+        "title": contact.get("title"),
+        "company": contact.get("company"),
+        "location": contact.get("location"),
+    }]
+    event_id = await manager.add_event(thread_id, "draft_suggested", {
+        "original_message": text,
+        "draft_reply": draft,
+        "matches": match_stub,
+    })
+    buttons = [
+        {"type": "reply", "reply": {"id": f"send_{event_id}", "title": "✅ Send"}},
+        {"type": "reply", "reply": {"id": f"skip_{event_id}", "title": "❌ Skip"}},
+    ]
+    draft_body = (
+        f"🤖 *{FRIEND_NAME} asked about {full_name}*\n\n"
+        f"*Draft:* {draft}\n\n"
+        f"Tap Send to use it as-is, or Skip to hold off."
+    )
+    await whatsapp.send_interactive_buttons(to=ALEX_NUMBER, body_text=draft_body, buttons=buttons)
+    emit("awaiting_approval", "📤 Sent to Alex for approval — waiting for Send/Skip")
+
+
 async def _run_matching_and_push_draft(
     db_pool, thread_id: int, whatsapp: "WhatsAppClient",
     request_text: str, display_text: str, uncertain: bool = False,
@@ -409,7 +489,7 @@ async def _process_sam_message(db_pool, thread_id: int, text: str, friend_event_
         except IntentClassificationError as e:
             slog(f"[Friend] Intent classification unavailable, failing open: {e}")
             emit("intent", "⚠️ AI classifier unreachable — assuming yes, just in case")
-            return {"is_request": True, "is_update": False, "update_target": None, "language": "English", "english_query": text}, True
+            return {"is_request": True, "is_update": False, "update_target": None, "named_contact": None, "language": "English", "english_query": text}, True
 
     (classification, classify_failed), candidates = await asyncio.gather(
         _classify(), engine.keyword_filter.filter_candidates(text)
@@ -460,6 +540,16 @@ async def _process_sam_message(db_pool, thread_id: int, text: str, friend_event_
 
     if not is_request:
         emit("resolved", "🙅 Not a contact request — nothing to do")
+        return
+
+    named_contact = classification.get("named_contact")
+    if named_contact:
+        # Asking about ONE specific named person ("Do you know Aaron
+        # Aguirre?") is an identity lookup, not a role/sector search — skip
+        # Stage 1/2 matching entirely (its LLM scoring would wrongly cap this
+        # below the viable threshold since there's no role to match against).
+        emit("intent", f"🧠 Yes — asking about a specific contact: {named_contact}")
+        await _handle_named_contact_lookup(db_pool, thread_id, text, whatsapp, named_contact)
         return
 
     emit("intent", f"🧠 Yes — this is a contact request ({language})")

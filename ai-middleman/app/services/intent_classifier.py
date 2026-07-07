@@ -87,23 +87,29 @@ class IntentClassifier:
 
 Friends may write to him in {languages_list}, and sometimes code-switch naturally between the two in the same message.
 
-Do ALL FOUR of the following in one pass:
+Do ALL FIVE of the following in one pass:
 
 1. Identify which language the message is written in: {languages_list} only — no other option exists. If it's already in English, is mostly English with just a greeting/aside in Afrikaans, is short/ambiguous, or you are not confident it is genuinely Afrikaans, say "English". Only say "Afrikaans" if you are confident the message is substantially written in Afrikaans.
 2. Decide: is this message asking Alex to introduce someone, recommend a contact, refer someone, or connect the sender with a person from Alex's professional network? (is_request)
 3. Decide: is this message sharing NEW factual information that should update a contact record — e.g. a new employer, new job title, new phone, new email, a promotion, or a location change? (is_update). This is DIFFERENT from a request: "I heard Aaron works at Deloitte now" is an update, NOT a request. "I moved to Yoco" is an update about the sender themselves.
-4. Give an English rendering of the message. If it's already in English, repeat it unchanged. Translate meaning, not word-for-word — keep any names, companies, and locations exactly as written.
+4. If is_request is true, decide whether the message is asking about ONE SPECIFIC NAMED PERSON Alex might know (not a role/skill/sector search). "Do you know Aaron Aguirre?" and "Do you have Sarah Chen's details?" name a specific individual — extract that name into named_contact. "Do you know any good lawyers?" and "Anyone senior at JPMorgan?" do NOT name a specific individual (they describe a role/company/sector) — named_contact is null for these, even though they ARE still is_request=true.
+5. Give an English rendering of the message. If it's already in English, repeat it unchanged. Translate meaning, not word-for-word — keep any names, companies, and locations exactly as written.
 
 The message may contain typos, missing letters, or autocorrect mistakes (people type fast on WhatsApp) — read past the typos and judge the intended meaning, not the exact spelling. For example "i want sometging is Al consunltinnng" means "I want something in AI consulting" and IS a contact request.
 
-is_request examples (TRUE):
+is_request examples (TRUE), named_contact null (role/sector/company search, not one specific person):
 - "Do you know any good lawyers in London?"
 - "Who should I speak to about raising Series A?"
 - "Can you connect me with someone in private equity?"
 - "I need a CFO for my startup, anyone come to mind?"
 - "Hey Alex any contacts in real estate Dubai?"
-- "Know anyone who does M&A advisory?"
+- "Do you know anyone from JPMorgan in a senior position?"
 - "Who's your guy for debt financing?"
+
+is_request examples (TRUE), named_contact SET (asking about one specific named individual):
+- "Do you know Aaron Aguirre? Do you have his details?" → named_contact: "Aaron Aguirre"
+- "Do you have Sarah Chen's number?" → named_contact: "Sarah Chen"
+- "Is David Cohen still someone you know?" → named_contact: "David Cohen"
 
 is_update examples (TRUE, is_request must be false):
 - "Aaron Acosta works at Deloitte now" → contact_name: "Aaron Acosta", attribute: "company", new_value: "Deloitte"
@@ -126,9 +132,9 @@ Neither (is_request=false, is_update=false):
 Message: "{message}"
 
 Reply with ONLY this exact JSON shape, nothing else — no markdown, no explanation:
-{{"language": "English or Afrikaans, nothing else", "is_request": true or false, "is_update": true or false, "english_query": "<English rendering of the message>", "update_target": {{"contact_name": "<name or null if sender updating themselves>", "attribute": "<attribute_name>", "new_value": "<new value>"}} }}
+{{"language": "English or Afrikaans, nothing else", "is_request": true or false, "is_update": true or false, "named_contact": "<full name or null>", "english_query": "<English rendering of the message>", "update_target": {{"contact_name": "<name or null if sender updating themselves>", "attribute": "<attribute_name>", "new_value": "<new value>"}} }}
 
-If is_update is false, set update_target to null."""
+If is_update is false, set update_target to null. If no specific person is named, set named_contact to null."""
 
         last_error = None
         for config in self.configs:
@@ -172,14 +178,18 @@ If is_update is false, set update_target to null."""
                                 detected_language = "English"
                             is_update = bool(data.get("is_update"))
                             update_target = data.get("update_target") if is_update else None
+                            named_contact = data.get("named_contact") or None
+                            if isinstance(named_contact, str) and not named_contact.strip():
+                                named_contact = None
                             result = {
                                 "is_request": bool(data.get("is_request")),
                                 "is_update": is_update,
                                 "update_target": update_target,
+                                "named_contact": named_contact,
                                 "language": detected_language,
                                 "english_query": data.get("english_query") or message,
                             }
-                            slog(f"[Intent/{config['name']}] {result['language']}, is_request={result['is_request']}, is_update={result['is_update']} (attempt {attempt})")
+                            slog(f"[Intent/{config['name']}] {result['language']}, is_request={result['is_request']}, is_update={result['is_update']}, named_contact={named_contact!r} (attempt {attempt})")
                             return result
                         except ValueError as e:
                             # Malformed / non-JSON reply — retry (transient LLM behaviour).
