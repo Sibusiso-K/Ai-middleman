@@ -200,3 +200,102 @@ Sound genuine, personal, and confident."""
         # still gets something to send rather than an error.
         slog("[Draft] all providers exhausted — returning fallback line")
         return "Hey! I've got some great people in mind for this — let me get back to you shortly 🤝"
+
+    async def generate_details_draft(
+        self,
+        contacts: List[Dict[str, Any]],
+        language: str = "English",
+    ) -> str:
+        """Generate a varied, Alex-voice reply that hands Sam the actual
+        contact details (phone/email). Each contact dict must have at least
+        full_name and details_str (pre-formatted as "📞 ... / 📧 ...").
+        Optional: title, company.
+
+        Unlike generate_draft(), PII is included — this is the delivery
+        message after Sam has already picked and Alex has approved sending."""
+        if not contacts:
+            return "Here you go! Let me know how it goes 🤝"
+
+        if len(contacts) == 1:
+            c = contacts[0]
+            name = c["full_name"]
+            first = name.split()[0]
+            role = " / ".join(filter(None, [c.get("title"), c.get("company")]))
+            role_line = f" ({role})" if role else ""
+            details = c["details_str"]
+            contact_block = f"{name}{role_line}: {details}"
+        else:
+            lines = []
+            for c in contacts:
+                role = " / ".join(filter(None, [c.get("title"), c.get("company")]))
+                role_suffix = f" ({role})" if role else ""
+                lines.append(f"{c['full_name']}{role_suffix}: {c['details_str']}")
+            contact_block = "\n".join(lines)
+            first = contacts[0]["full_name"].split()[0]
+
+        language_rule = (
+            "Reply in English."
+            if language == "English" else
+            f"Reply in {language}. Keep contact names, job titles, and company names in English."
+        )
+
+        plural = len(contacts) > 1
+        prompt = f"""You are writing a WhatsApp message for Alex, a well-connected business professional, handing over real contact details to his friend Sam.
+
+Alex's style:
+- Warm, casual, direct — like texting a close mate
+- Short: 1-3 sentences maximum
+- Uses occasional emoji naturally (🤝 👌 💪 🙌) — one or two max
+- Vouches personally for the people he introduces
+- Never formal, never "I hope this helps", never stiff sign-offs
+- Varies his phrasing each time — does not always say "Tell them I sent you"
+
+Contact details to include EXACTLY as written (do NOT change or omit them):
+{contact_block}
+
+{"The user asked for multiple people." if plural else "The user asked for this one person."}
+
+{language_rule}
+
+Write Alex's reply now. Include ALL the details above verbatim. 1-3 sentences. Raw message text only — no quotes around it."""
+
+        for config in self.configs:
+            headers = {
+                "Authorization": f"Bearer {config['api_key']}",
+                "Content-Type": "application/json",
+            }
+            json_payload = {
+                "model": config["model"],
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.85,
+                "max_tokens": 160,
+            }
+            for attempt in range(1, self.max_attempts + 1):
+                try:
+                    async with httpx.AsyncClient() as client:
+                        response = await client.post(
+                            config["api_url"], headers=headers, json=json_payload,
+                            timeout=self._timeout_for(config),
+                        )
+                    if response.status_code == 200:
+                        draft = response.json()["choices"][0]["message"]["content"].strip()
+                        draft = _strip_wrapping_quotes(draft)
+                        slog(f"[Details/{config['name']}] Generated: {draft[:100]}...")
+                        return draft
+                    if response.status_code == 429 and config is not self.configs[-1]:
+                        slog(f"[Details/{config['name']}] rate-limited — switching provider")
+                        break
+                    slog(f"[Details/{config['name']}] error {response.status_code} (attempt {attempt})")
+                    if response.status_code < 500 and response.status_code != 429:
+                        break
+                except (httpx.TimeoutException, httpx.TransportError) as e:
+                    slog(f"[Details/{config['name']}] transient error attempt {attempt}: {type(e).__name__}")
+                if attempt < self.max_attempts:
+                    await asyncio.sleep(self._backoff_for(config) * attempt)
+
+        # Fallback: structured but natural enough
+        if len(contacts) == 1:
+            c = contacts[0]
+            return f"Here you go — {c['full_name']}: {c['details_str']} 🤝"
+        lines = "\n".join(f"{c['full_name']}: {c['details_str']}" for c in contacts)
+        return f"Here you go 🤝\n{lines}"

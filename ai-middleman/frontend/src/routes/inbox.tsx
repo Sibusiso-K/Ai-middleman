@@ -204,6 +204,12 @@ function InboxPage() {
                     return <div key={e.id} className="text-xs text-muted-foreground text-center italic">— Alex skipped a suggested reply —</div>;
                   if (e.event_type === "draft_suggested" && !events.some((ev, j) => j > i && ["draft_sent", "draft_edited", "draft_skipped"].includes(ev.event_type)))
                     return <div key={e.id} className="text-xs text-muted-foreground text-center">⏳ Alex has a suggested reply pending on his WhatsApp…</div>;
+                  if (e.event_type === "update_pending")
+                    return <div key={e.id} className="text-xs text-muted-foreground text-center italic">— ⏳ Update sent to Alex for approval —</div>;
+                  if (e.event_type === "contact_updated")
+                    return <div key={e.id} className="text-xs text-muted-foreground text-center italic">— ✅ Alex approved — {e.payload.attribute} updated to {e.payload.new_value} —</div>;
+                  if (e.event_type === "update_ignored")
+                    return <div key={e.id} className="text-xs text-muted-foreground text-center italic">— ❌ Alex declined the update — no changes made —</div>;
                   return null;
                 })
               )}

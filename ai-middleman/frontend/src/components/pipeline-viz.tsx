@@ -4,20 +4,21 @@ import { Card } from "@/components/ui-bits";
 import { api, type PipelineEvent } from "@/lib/api";
 import {
   Mail, Radio, Search, BrainCircuit, Link2, PenLine, Send, CheckCircle2,
-  Database, UserSearch,
+  Database, UserSearch, ShieldCheck,
 } from "lucide-react";
 
 const STAGE_NODES = [
-  { key: "received", icon: Mail, label: "Message received" },
-  { key: "relaying", icon: Radio, label: "Relaying to Alex" },
-  { key: "checking", icon: Search, label: "Quick pattern check" },
-  { key: "intent", icon: BrainCircuit, label: "AI: is this a request?" },
-  { key: "updating", icon: Database, label: "Updating contact record" },
-  { key: "named_lookup", icon: UserSearch, label: "Looking up named contact" },
-  { key: "matching", icon: Link2, label: "Matching contacts" },
-  { key: "drafting", icon: PenLine, label: "Writing a draft" },
-  { key: "awaiting_approval", icon: Send, label: "Waiting on Alex" },
-  { key: "resolved", icon: CheckCircle2, label: "Resolved" },
+  { key: "received",        icon: Mail,          label: "Message received" },
+  { key: "relaying",        icon: Radio,         label: "Relaying to Alex" },
+  { key: "checking",        icon: Search,        label: "Quick pattern check" },
+  { key: "intent",          icon: BrainCircuit,  label: "AI: is this a request?" },
+  { key: "updating",        icon: Database,      label: "Updating contact record" },
+  { key: "update_approval", icon: ShieldCheck,   label: "Waiting on Alex to confirm update" },
+  { key: "named_lookup",    icon: UserSearch,    label: "Looking up named contact" },
+  { key: "matching",        icon: Link2,         label: "Matching contacts" },
+  { key: "drafting",        icon: PenLine,       label: "Writing a draft" },
+  { key: "awaiting_approval", icon: Send,        label: "Waiting on Alex" },
+  { key: "resolved",        icon: CheckCircle2,  label: "Resolved" },
 ] as const;
 
 // One accent per stage, grouped into phases (relay → understand → match/draft
@@ -33,6 +34,7 @@ const STAGE_ACCENT: Record<string, Accent> = {
   matching:          { icon: "text-amber-500",  ring: "border-amber-400",  fill: "bg-amber-400/15",  glow: "shadow-amber-400/50",  line: "bg-amber-400",  feed: "border-l-amber-400" },
   drafting:          { icon: "text-amber-500",  ring: "border-amber-400",  fill: "bg-amber-400/15",  glow: "shadow-amber-400/50",  line: "bg-amber-400",  feed: "border-l-amber-400" },
   updating:          { icon: "text-teal-500",    ring: "border-teal-400",    fill: "bg-teal-400/15",    glow: "shadow-teal-400/50",    line: "bg-teal-400",    feed: "border-l-teal-400" },
+  update_approval:   { icon: "text-orange-500",  ring: "border-orange-400",  fill: "bg-orange-400/15",  glow: "shadow-orange-400/50",  line: "bg-orange-400",  feed: "border-l-orange-400" },
   named_lookup:      { icon: "text-fuchsia-500", ring: "border-fuchsia-400", fill: "bg-fuchsia-400/15", glow: "shadow-fuchsia-400/50", line: "bg-fuchsia-400", feed: "border-l-fuchsia-400" },
   awaiting_approval: { icon: "text-primary",    ring: "border-primary",    fill: "bg-primary/15",    glow: "shadow-primary/50",    line: "bg-primary",    feed: "border-l-primary" },
   resolved:          { icon: "text-success",    ring: "border-success",    fill: "bg-success/15",    glow: "shadow-success/50",    line: "bg-success",    feed: "border-l-success" },

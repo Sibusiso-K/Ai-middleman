@@ -263,13 +263,13 @@ async def _handle_followup_selection(db_pool, thread_id: int, text: str, whatsap
     if not picked:
         return False  # couldn't resolve any real details — let the pipeline try
 
-    if len(picked) == 1:
-        p = picked[0]
-        draft = f"Here's {p['first']} for you — {p['details']}. Tell {p['first']} I sent you 🤝"
-    else:
-        body = "\n".join(f"{p['first']} — {p['details']}" for p in picked)
-        names = _join_names([p["first"] for p in picked])
-        draft = f"Here you go 🤝\n{body}\nTell {names} I sent you!"
+    generator = DraftGenerator()
+    contacts_for_draft = [
+        {"full_name": p["full_name"], "details_str": p["details"],
+         "title": p["match"].get("title"), "company": p["match"].get("company")}
+        for p in picked
+    ]
+    draft = await generator.generate_details_draft(contacts_for_draft)
 
     event_id = await manager.add_event(thread_id, "draft_suggested", {
         "original_message": text,
@@ -337,11 +337,17 @@ async def _handle_named_contact_lookup(
 
     wants_details = _looks_like_details_request(text)
     if wants_details and (contact.get("phone") or contact.get("email")):
-        details = " / ".join(filter(None, [
+        details_str = " / ".join(filter(None, [
             f"📞 {contact['phone']}" if contact.get("phone") else None,
             f"📧 {contact['email']}" if contact.get("email") else None,
         ]))
-        draft = f"Yeah I know {first}{role_note} — {details}. Tell {first} I sent you 🤝"
+        generator = DraftGenerator()
+        draft = await generator.generate_details_draft([{
+            "full_name": full_name,
+            "details_str": details_str,
+            "title": contact.get("title"),
+            "company": contact.get("company"),
+        }])
     else:
         draft = f"Yeah I know {first}{role_note}. Want me to send you their details?"
 
@@ -566,7 +572,7 @@ async def _process_sam_message(db_pool, thread_id: int, text: str, friend_event_
                 {"type": "reply", "reply": {"id": "update_no",  "title": "❌ Ignore"}},
             ],
         )
-        emit("awaiting_approval", f"⏳ Waiting for Alex to approve update to {who}'s {attribute}")
+        emit("update_approval", f"⏳ Waiting for Alex to approve update to {who}'s {attribute}")
         return
 
     if not is_request:

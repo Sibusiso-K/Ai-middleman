@@ -228,13 +228,10 @@ async def handle_button_reply(manager, thread_id, reply_id: str):
     # ── Update approval / rejection ──────────────────────────────────────────
     if reply_id in ("update_yes", "update_no"):
         from app.services.update_extractor import apply_update
-        from app.services.whatsapp_client import WhatsAppClient
-        whatsapp = WhatsAppClient()
 
         pending_update = await manager.get_latest_pending_update(thread_id)
         if not pending_update:
             print("[Button] No pending update to act on")
-            await whatsapp.send_message(to=ALEX_NUMBER, text="No pending update found — it may have already been resolved.")
             return
 
         update_target = pending_update.get("update_target", {})
@@ -254,7 +251,6 @@ async def handle_button_reply(manager, thread_id, reply_id: str):
                 "new_value": update_target.get("new_value"),
                 "reply": reply,
             })
-            await whatsapp.send_message(to=ALEX_NUMBER, text=f"Done! {reply}")
             slog(f"[Update] Alex approved: {reply}")
             emit("resolved", f"✅ Alex approved the update — {reply}")
         else:
@@ -262,7 +258,6 @@ async def handle_button_reply(manager, thread_id, reply_id: str):
                 "source_message": source_message,
                 "update_target": update_target,
             })
-            await whatsapp.send_message(to=ALEX_NUMBER, text="No problem — left it unchanged.")
             slog("[Update] Alex ignored the proposed update")
             emit("resolved", "❌ Alex ignored the update — no changes made")
         return
