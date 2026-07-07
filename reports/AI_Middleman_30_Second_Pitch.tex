@@ -1,0 +1,116 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{fancyhdr}
+\usepackage{tcolorbox}
+\tcbuselibrary{skins}
+
+\definecolor{isaziteal}{HTML}{2AB6C4}
+\definecolor{isazipink}{HTML}{C7327A}
+\definecolor{isaziorange}{HTML}{F0803C}
+\definecolor{isazigold}{HTML}{F0B429}
+
+\titleformat{\section}{\Large\bfseries\color{isazipink}}{\thesection}{0.6em}{}
+\titleformat{\subsection}{\normalsize\bfseries\color{isaziteal}}{}{0em}{}
+
+\newtcolorbox{scriptbox}{colback=gray!5,colframe=gray!40,fonttitle=\bfseries,title=SAY THIS (word-for-word),boxrule=0.6pt,arc=2pt}
+\newtcolorbox{actionbox}{colback=isaziteal!8,colframe=isaziteal,fonttitle=\bfseries,title=DO THIS,boxrule=0.8pt,arc=2pt}
+\newtcolorbox{notebox}{colback=isazigold!10,colframe=isaziorange,fonttitle=\bfseries,title=NOTE,boxrule=0.8pt,arc=2pt}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot[C]{\small\color{gray}AI Middleman -- 30-Second Pitch}
+\fancyfoot[R]{\small\color{gray}\thepage}
+\renewcommand{\headrulewidth}{0pt}
+
+\title{\color{isazipink}\Huge AI Middleman\\\Large The 30-Second Pitch}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{tcolorbox}[colback=isazipink!6,colframe=isazipink,title=HOW TO USE THIS DOCUMENT,fonttitle=\bfseries]
+This is a standalone elevator pitch --- separate from the full presentation script and Q\&A prep. Use it whenever you have 30 seconds and no slides: a hallway conversation, a ``so what do you do'' moment, an intro before a longer demo. Three beats, in order: \textbf{Problem} $\to$ \textbf{Demo the solution} $\to$ \textbf{Close on the problem, in numbers}. Total spoken length is \textbf{78 words} (counted, not estimated) --- at a natural conversational pace ($\sim$150 words/minute) that's $\sim$31 seconds; a slightly brisker pace ($\sim$170 wpm, normal for an energised pitch) brings it to $\sim$27--28 seconds. \textbf{Rehearse it out loud with a timer before using it live} --- reading pace varies more than people expect, and this script is written to sit right at the 30-second mark either way.
+\end{tcolorbox}
+
+\section{The structure, at a glance}
+
+\begin{center}
+\begin{tabular}{@{}p{2.2cm}p{2cm}p{1.8cm}p{7.5cm}@{}}
+\toprule
+Beat & Time & Words & Job \\
+\midrule
+1. Problem & $\sim$11s & 27 & Make them feel it in one concrete moment, not an abstract claim \\
+2. Demo the solution & $\sim$13s & 33 & Show what the system \emph{does}, narrated as if it's happening live \\
+3. Close on the problem & $\sim$7s & 18 & Restate the problem, now solved --- in a number, naming who benefits \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Beat 1 --- The Problem}
+
+\begin{scriptbox}
+``A friend texts you: `know a good lawyer in London?' The person's in your network somewhere --- but finding them, and writing the intro, eats your evening.''
+\end{scriptbox}
+
+\begin{notebox}
+This is the same hook used in the full presentation script (Section 1 of \emph{AI\_Middleman\_Presentation\_Prep.tex}), compressed to one breath. It works because it's a scene, not a statistic --- the listener pictures their own phone. Don't generalise it (``professionals often struggle to\ldots'') --- the specificity is what makes it land in 10 seconds.
+\end{notebox}
+
+\section{Beat 2 --- Demo the Solution}
+
+\begin{scriptbox}
+``Watch. The message comes in --- AI Middleman searches fifty thousand contacts, drafts the intro in Alex's own voice, sends it to Alex --- one tap to approve, and it's out in seconds.''
+\end{scriptbox}
+
+\begin{actionbox}
+If you have the app open: actually send the message as ``Sam'' right as you say ``Watch,'' and let the live pipeline stepper do the visual work while you talk over it --- the lit-up nodes (searching $\to$ drafting $\to$ waiting on Alex) are more convincing than any slide. If you don't have it open, this line still works spoken alone; say it as if you're describing something happening in front of you, not reciting a feature list.
+\end{actionbox}
+
+\begin{notebox}
+Three things this line does deliberately: (1) ``fifty thousand contacts'' gives the scale a number, not a vague ``his whole network''; (2) ``in Alex's own voice'' signals this isn't a generic auto-reply; (3) ``one tap to approve'' plants the human-in-the-loop safety point without spending a separate sentence on it --- you don't have time to explain \emph{why} approval matters in a 30-second pitch, so just show that it exists.
+\end{notebox}
+
+\section{Beat 3 --- Close on the Problem (with the number)}
+
+\begin{scriptbox}
+``That's an evening of digging turned into a ten-second tap --- giving every well-connected professional their time back.''
+\end{scriptbox}
+
+\begin{notebox}
+This is the beat the user specifically asked for: \textbf{end back on the problem statement, with the time saved for the target market named explicitly.} ``An evening'' (Beat 1's cost) collapses into ``a ten-second tap'' (the actual interaction time to approve a draft) --- that contrast \emph{is} the pitch. ``Every well-connected professional'' names the target market plainly: not ``users,'' not ``people like Alex'' --- the actual buyer persona, so a listener with that exact problem self-identifies immediately.
+\end{notebox}
+
+\section{The full script, back to back}
+
+\begin{tcolorbox}[colback=gray!5,colframe=isazipink,title={\textbf{Read this straight through, no pauses between beats}},fonttitle=\bfseries,boxrule=1pt,arc=3pt]
+\itshape
+``A friend texts you: `know a good lawyer in London?' The person's in your network somewhere --- but finding them, and writing the intro, eats your evening.
+
+Watch. The message comes in --- AI Middleman searches fifty thousand contacts, drafts the intro in Alex's own voice, sends it to Alex --- one tap to approve, and it's out in seconds.
+
+That's an evening of digging turned into a ten-second tap --- giving every well-connected professional their time back.''
+\end{tcolorbox}
+
+\section{If you're running long --- the 15-second cut}
+
+For a genuinely tight window (someone else is about to talk, you're being introduced mid-sentence), drop straight to problem $\to$ close, skip the demo narration entirely:
+
+\begin{scriptbox}
+``Networking pros lose an evening every time a friend asks for an intro --- digging through contacts, writing it up by hand. AI Middleman turns that into a ten-second approval on WhatsApp.''
+\end{scriptbox}
+
+Use this only as a true fallback --- it loses the demo beat entirely, and the demo is what makes people lean in. Prefer the full 30-second version whenever you have the time.
+
+\section{What NOT to do in 30 seconds}
+\begin{itemize}
+    \item Don't mention the tech stack, the model, or Groq --- there's no time, and it's not what sells the idea. Save it for the follow-up question.
+    \item Don't hedge (``it's still a prototype, but\ldots'') inside the pitch itself --- confidence here, honesty later if asked. The full Q\&A prep (Section~7 of the main presentation doc) is where the honest 6.5/10 self-assessment lives; it would undercut a 30-second hook.
+    \item Don't explain the two-stage retrieval architecture. If someone asks ``how does it actually search 50,000 contacts,'' that's a great follow-up question --- let them ask it, don't pre-empt it.
+    \item Don't rush the close. The last line is the one that gets remembered --- slow down slightly on ``giving every well-connected professional their time back'' rather than speeding up to fit the clock.
+\end{itemize}
+
+\end{document}

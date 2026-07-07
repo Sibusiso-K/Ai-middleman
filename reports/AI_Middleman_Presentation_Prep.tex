@@ -89,7 +89,7 @@ The system is a linear pipeline of nine components. Being able to name and expla
 6 & Conversation state & \texttt{conversation\_manager.py} + \texttt{threads}/\texttt{thread\_events} & Append-only event log per thread; stores each draft's suggested people so follow-ups can be resolved against them & Correct data model for multi-turn conversation; this is what makes ``connect me with John and Sally'' work (Section~\ref{sec:followup}) \\
 7 & Human approval gate & WhatsApp interactive buttons + Flow & Alex approves before anything reaches the requester & \textbf{The single best architectural decision in the project} --- no LLM output reaches a third party unsupervised \\
 8 & Egress & \texttt{whatsapp\_client.py} & Sends the approved reply via Graph API & Straightforward, no issues found \\
-9 & Dashboard & React/TanStack + \texttt{dashboard\_api.py} & Live pipeline visualization, contacts browser, analytics, ``Sam'' simulator & The actual demo surface --- the live pipeline feed is your best visual aid \\
+9 & Dashboard & React/TanStack + \texttt{dashboard\_api.py} & Live pipeline visualization, contacts browser, analytics, ``Sam'' simulator & The actual demo surface --- the live pipeline feed is your best visual aid. The stepper now has 10 stages, including two new ones (Updating contact record, Looking up named contact) for the branches in Section~\ref{sec:newbranches} \\
 \bottomrule
 \end{longtable}
 
@@ -99,6 +99,31 @@ The system is a linear pipeline of nine components. Being able to name and expla
 Originally this was \emph{one} merged ``rank AND draft'' LLM call. On an 8B model, the combined prompt grew large enough ($\sim$20{,}000 characters with 25 candidates) that it sometimes returned empty completions. Splitting into two focused calls --- one narrow JSON-ranking task, one narrow prose-writing task --- fixed it.
 
 \textbf{The lesson to state out loud:} smaller, single-purpose prompts are more reliable than one prompt trying to do two jobs, especially on smaller models. This is a real engineering decision you made, not a default --- own it.
+
+\subsection{Two new pipeline branches --- conversational database updates \& named-contact lookup}
+\label{sec:newbranches}
+
+Added this session, on top of the same nine-component pipeline. Both are visible live on the dashboard's pipeline stepper (new nodes: \textbf{Updating contact record} and \textbf{Looking up named contact}), not just log lines.
+
+\textbf{1. Sam can update the database by texting a fact.} ``I heard Aaron Acosta works at Deloitte now'' or ``I moved to Yoco'' is detected as a database update, not a contact request, applied immediately, and confirmed back on Alex's WhatsApp --- with a full audit trail. The intent classifier gained a fourth output field (\texttt{is\_update} + a structured \texttt{update\_target}: contact name, attribute, new value); a new \texttt{update\_extractor.py} fuzzy-resolves the name against the database and writes the change; every change is logged to a new \texttt{contact\_change\_log} table (old value, new value, who said it, the raw source message, timestamp).
+
+\textbf{Design decision worth naming if asked:} the natural-seeming approach is a fully normalized bank-style schema --- a master identity table plus a separate versioned-attributes table (SCD Type 2). That was considered and \emph{rejected}: it would have required rewriting Stage 1's SQL matching (which does simple column reads like \texttt{WHERE title \textasciitilde{} pattern}) into per-field joins across every query. Instead, updates write directly into the existing \texttt{contacts} table (so Stage 1 keeps working unchanged) and \texttt{contact\_change\_log} \emph{is} the audit history --- current-state-plus-audit-log, not full SCD2. That's the standard pragmatic middle ground, not the theoretically ``purest'' design, chosen because touching the matching pipeline days before a demo was the higher-risk move.
+
+\textbf{2. Sam can ask about one specific named person directly.} ``Do you know Aaron Aguirre? Do you have his details?'' is a fundamentally different question from ``anyone from JPMorgan in a senior position?'' --- one names an individual, the other describes a role/company/sector. The intent classifier now extracts a \texttt{named\_contact} field distinguishing the two. \textbf{Why this needed its own code path, not just better matching:} Stage 2's LLM scoring is built entirely around role/sector relevance and explicitly caps anything that isn't a genuine role match below the 0.5 viable threshold --- so a real named contact sitting right in the database would score low and get silently dropped by the existing pipeline. Named lookups now skip Stage 1/2 entirely and go straight to a direct fuzzy database lookup, still gated behind Alex's Send/Skip approval, with phone/email only included in the draft if Sam's message actually asked for details.
+
+\textbf{A real bug found live while verifying this (good Q\&A material):} a pre-existing ``send me their details'' shortcut ran \emph{before} intent classification and, on a generic details request, fell back to whoever was last sent --- so ``Do you know Elizabeth Sanchez? Do you have her details?'' was initially hijacked and handed back a stale, unrelated contact from earlier in the thread, never reaching the new named-lookup code at all. Fixed by checking whether the message names someone who isn't among the recently suggested people before that fallback is allowed to fire, and re-verified live end-to-end afterward. \textbf{This is a strong story for ``what did you catch during your own testing'' --- it shows real verification, not just writing code and assuming it works.}
+
+\subsection{Wider Stage 1 search --- fixing gaps found while building the above}
+\label{sec:widersearch}
+
+Testing the named-lookup feature against real examples surfaced concrete gaps in the existing keyword search, fixed the same session:
+\begin{itemize}
+    \item \textbf{Seniority search was silently broken even after adding the column.} The \texttt{seniority} column never literally contains the word ``senior'' --- real values are \texttt{MD}/\texttt{Partner}/\texttt{Director}/\texttt{Principal}/\texttt{VP}/\texttt{Analyst}/\texttt{Associate}. A \texttt{SENIORITY\_HINTS} map (mirroring the existing \texttt{SECTOR\_HINTS} pattern) now maps ``senior''/``junior''/``executive'' to the actual values they mean.
+    \item \textbf{``JPMorgan'' (no space, how people actually type it) matched nothing} against the database's ``JP Morgan'' (with space). Fixed by comparing the company column with spaces stripped on both sides. Verified: 1 candidate before the fix, 25 correctly-ranked candidates after.
+    \item \textbf{Location search was blind to any city outside a small curated list.} Real database values like ``Cape Town'' and ``Tel Aviv'' were previously invisible to any location-based query at all --- only a hardcoded list of $\sim$30 major cities got real location matching; other locations relied on the keyword falling through to unrelated fields (e.g., a company or sector partial match) by coincidence. Added \texttt{location} as a general fallback search field.
+    \item Added \texttt{how\_alex\_knows\_them} (freeform relationship context, e.g.\ ``University friend --- Wits CS class of 2019'') as a low-weight searchable field, so ``anyone I know from Wits'' can surface a contact via relationship context, not just role/company text.
+\end{itemize}
+\textbf{The pattern worth naming:} none of these were found by writing more code --- they were found by testing the \emph{exact phrasing} a real user would type against the real seed data, not idealized test queries. ``JPMorgan'' with no space is exactly how a person types on a phone; the eval set alone wouldn't have caught it without that live check.
 
 \subsection{Conversational follow-ups --- ``connect me with John and Sally''}
 \label{sec:followup}
@@ -200,6 +225,7 @@ This is the biggest live-demo risk, and it was directly stress-tested (Section~\
 9 & Entire pipeline depends on two free-tier LLM APIs with no paid/self-hosted fallback & Production risk & Known, by design (budget constraint) \\
 10 & Stage 1 (keyword filter) is a plain SQL keyword match against English contact data --- a non-English message would match nothing, so Stage 2's ranking never even saw candidates, regardless of how good it was & \badc{Was the real blocker for multilingual support, not the draft/image issues above} & \good{Fixed} --- see Section~\ref{sec:multilingual} \\
 11 & Language was re-detected independently on every message with no memory of the conversation --- a short, ambiguous follow-up (``anyone else'') randomly flipped a fluent Afrikaans conversation into garbled isiZulu, and isiZulu-family output was frequently ungrammatical even when correctly triggered & \badc{The multilingual feature was actively unreliable, caught from real conversation logs before the demo} & \good{Fixed} --- scope reduced to English + Afrikaans (the only language verified fluent); added a ``sticky'' rule so short messages inherit the conversation's established language instead of re-guessing; see Section~\ref{sec:multilingual} \\
+12 & The pre-existing ``send me their details'' follow-up shortcut ran \emph{before} intent classification and, on a generic details request with no specific name, fell back to whoever was last sent --- so a fresh named-contact question (``Do you know Elizabeth Sanchez? Do you have her details?'') was silently hijacked and handed back a stale, unrelated contact instead of ever reaching the new named-lookup feature & \badc{Correctness --- wrong contact's details could be delivered} & \good{Fixed} --- added a check that the fallback only fires when the message doesn't name someone outside the recently suggested people; caught during live verification of Section~\ref{sec:newbranches}, re-tested end-to-end after the fix \\
 \bottomrule
 \end{longtable}
 
@@ -260,6 +286,12 @@ Confusion: TP=10, FP=0, TN=10, FN=0. Messages were phrased deliberately \emph{di
 \subsection{Follow-up selection --- 12 cases, deterministic}
 \textbf{Selection accuracy: \good{12/12 (100.0\%)}}. This check runs the \texttt{\_resolve\_selected\_contacts} resolver directly --- it's a pure function, so \textbf{no LLM, no API, no Groq quota}, which makes it fully deterministic regression coverage. It verifies both the picks that must fire (by name, possessive ``John's'', position, ``both''/``all three'') and the ones that must \emph{not} (``John's too junior, anyone else?'', a bare ``yeah'', an unrelated fresh request).
 
+\subsection{Update detection --- 13 labeled messages (new this session)}
+\textbf{Accuracy: \good{13/13 (100.0\%)}}. Verifies \texttt{is\_update} detection across company/title/email/phone/location changes, and --- the trickier part --- correctly distinguishes a \emph{named} update (``Aaron Acosta works at Deloitte now'') from a \emph{self}-update (``I moved to Yoco'' --- no name given, so it must resolve to the sender), plus zero false positives against genuine contact requests and chit-chat.
+
+\subsection{Named-contact detection --- 7 labeled messages (new this session)}
+\textbf{Accuracy: \good{7/7 (100.0\%)}}, including the specific ``anyone from JPMorgan in a senior position?'' example (correctly \emph{not} flagged as naming an individual) alongside ``Do you know Aaron Aguirre?'' (correctly extracted as one).
+
 \subsection{The deterministic-vs-stochastic point --- a strong thing to say}
 The three checks split cleanly, and naming that split shows real testing maturity:
 \begin{itemize}
@@ -271,7 +303,7 @@ The three checks split cleanly, and naming that split shows real testing maturit
 
 \subsection{Honest caveats --- say these unprompted}
 \begin{itemize}
-    \item $n=20$ intent, $n=12$ matching, $n=12$ follow-up --- real numbers, but a small sample. Say ``on a 44-case labeled test set,'' not ``we benchmarked the system.''
+    \item $n=20$ intent, $n=12$ matching, $n=12$ follow-up, $n=13$ update detection, $n=7$ named-contact --- real numbers, but a small sample. Say ``on a 64-case labeled test set,'' not ``we benchmarked the system.''
     \item These test sets were written immediately after building/fixing the features they now pass against --- legitimate evidence of correctness, not proof of robustness under real-world message diversity at scale.
     \item Matching ``relevance'' is a location/company-match proxy, not human-graded relevance --- a reasonable stand-in given the synthetic dataset, but name it as a proxy if pressed.
 \end{itemize}
@@ -381,6 +413,8 @@ Question & Your answer \\
 ``Does it support South Africa's 11 languages?'' & By design, just English and Afrikaans. I tested against more and found real problems --- isiZulu output was often ungrammatical, and short messages caused the detected language to flip randomly mid-conversation. I fixed the flipping (a ``sticky'' rule) and scoped the language set down to the two that are actually reliable, rather than demo something that could embarrass itself live. \\
 ``What would you build next?'' & Native-speaker review of the Afrikaans output (judged so far by a non-native speaker), then re-attempting the other 9 languages one at a time with real verification before re-adding any of them --- plus scaling the existing eval set to more real-world message diversity. \\
 ``Does Alex have full control?'' & Yes --- every single reply is gated behind Alex approving Send/Edit/Skip on his real WhatsApp. No AI-generated text reaches a third party unsupervised. \\
+``Can Sam update the database, not just search it?'' & Yes --- ``I heard Aaron works at Deloitte now'' or ``I moved to Yoco'' is detected as a database update (not a request), applied directly, and fully audit-logged (old value, new value, who said it, the raw message). Confirmed back to Alex on WhatsApp, visible on the pipeline as its own step. \\
+``Can I ask about one specific person by name, not just a role?'' & Yes --- ``Do you know Aaron Aguirre?'' is treated differently from ``anyone from JPMorgan in a senior position?''. Named lookups skip the role-ranking stage entirely (which would otherwise wrongly score a real named contact as a non-match) and go straight to a direct database lookup, still gated behind Alex's approval. \\
 \bottomrule
 \end{longtable}
 
@@ -439,6 +473,20 @@ Johannesburg isn't in the dataset, so the match comes back low-confidence / no c
     \item Tap the mic, say a request out loud (e.g.\ ``know any fintech founders in Singapore?'') --- it's transcribed and runs the same pipeline.
     \item Attach a photo of a business card or a job posting --- the text is read out of the image and fed in as if typed.
 \end{itemize}
+
+\subsection{Flow 8 --- database update (new this session)}
+\begin{enumerate}
+    \item \emph{Sam:} ``I heard Aaron Acosta works at Deloitte now''
+    \item[] $\rightarrow$ pipeline shows \textbf{Updating contact record}; Alex's WhatsApp gets a confirmation (``Got it! Updated Aaron's company to Deloitte (was: \ldots) $\checkmark$''); the change is written to the database and logged with the old value.
+\end{enumerate}
+Good follow-up to run immediately after: ask about that same person by name (Flow 9) to show the update actually took effect.
+
+\subsection{Flow 9 --- direct named-contact lookup (new this session)}
+\begin{enumerate}
+    \item \emph{Sam:} ``Do you know Aaron Acosta? Do you have his details?''
+    \item[] $\rightarrow$ pipeline shows \textbf{Looking up named contact} (a distinct step from ``Matching contacts''); a Send/Skip draft with his actual phone/email appears on Alex's WhatsApp, reflecting the just-updated company from Flow 8.
+\end{enumerate}
+\textbf{Why running Flow 8 then Flow 9 back-to-back is a strong demo moment:} it proves the update pipeline and the lookup pipeline share the same underlying data live --- not two disconnected features.
 
 \textbf{Safe city/sector combos} (strong matches in the seed data): London, New York, Dubai, Singapore, Hong Kong, Boston, Amsterdam, Zurich, Tel Aviv, Mumbai $\times$ finance / legal / healthcare / energy / real estate / tech. Avoid cities \emph{not} in the set (Johannesburg, Cape Town, Nairobi, Lagos) unless you're deliberately demoing Flow 4.
 
