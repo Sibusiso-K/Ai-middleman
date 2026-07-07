@@ -91,7 +91,7 @@ Do ALL FIVE of the following in one pass:
 
 1. Identify which language the message is written in: {languages_list} only — no other option exists. If it's already in English, is mostly English with just a greeting/aside in Afrikaans, is short/ambiguous, or you are not confident it is genuinely Afrikaans, say "English". Only say "Afrikaans" if you are confident the message is substantially written in Afrikaans.
 2. Decide: is this message asking Alex to introduce someone, recommend a contact, refer someone, or connect the sender with a person from Alex's professional network? (is_request)
-3. Decide: is this message sharing NEW factual information that should update a contact record — e.g. a new employer, new job title, new phone, new email, a promotion, or a location change? (is_update). This is DIFFERENT from a request: "I heard Aaron works at Deloitte now" is an update, NOT a request. "I moved to Yoco" is an update about the sender themselves.
+3. Decide: is this message sharing NEW factual information that should update a contact record — e.g. a new employer, new job title, new phone, new email, a promotion, or a location change? (is_update). This is DIFFERENT from a request. Updates include direct statements ("Aaron works at Deloitte now"), hearsay ("I heard Aaron moved to JP Morgan", "Someone told me Sarah got promoted"), past confirmations ("I confirmed that Kara moved to Bain Capital"), and discoveries ("Just found out David left BCG"). All of these are is_update=true, is_request=false. "I moved to Yoco" is an update about the sender themselves. A message is an update whenever it tells Alex that a fact has CHANGED — even if it names a specific person.
 4. If is_request is true, decide whether the message is asking about ONE SPECIFIC NAMED PERSON Alex might know (not a role/skill/sector search). "Do you know Aaron Aguirre?" and "Do you have Sarah Chen's details?" name a specific individual — extract that name into named_contact. "Do you know any good lawyers?" and "Anyone senior at JPMorgan?" do NOT name a specific individual (they describe a role/company/sector) — named_contact is null for these, even though they ARE still is_request=true.
 5. Give an English rendering of the message. If it's already in English, repeat it unchanged. Translate meaning, not word-for-word — keep any names, companies, and locations exactly as written.
 
@@ -111,13 +111,22 @@ is_request examples (TRUE), named_contact SET (asking about one specific named i
 - "Do you have Sarah Chen's number?" → named_contact: "Sarah Chen"
 - "Is David Cohen still someone you know?" → named_contact: "David Cohen"
 
-is_update examples (TRUE, is_request must be false):
-- "Aaron Acosta works at Deloitte now" → contact_name: "Aaron Acosta", attribute: "company", new_value: "Deloitte"
-- "Sarah left McKinsey, she's at BCG now" → contact_name: "Sarah", attribute: "company", new_value: "BCG"
-- "Thabo got promoted to Managing Director" → contact_name: "Thabo", attribute: "title", new_value: "Managing Director"
-- "I moved to Yoco, not Takealot anymore" → contact_name: null (sender updating themselves), attribute: "company", new_value: "Yoco"
-- "My email changed to sam@yoco.com" → contact_name: null, attribute: "email", new_value: "sam@yoco.com"
-- "My new number is 082 555 1234" → contact_name: null, attribute: "phone", new_value: "082 555 1234"
+is_update examples (TRUE, is_request MUST be false — these are news, not requests):
+- "Aaron Acosta works at Deloitte now" → is_update: true, is_request: false
+- "Sarah left McKinsey, she's at BCG now" → is_update: true, is_request: false
+- "Thabo got promoted to Managing Director" → is_update: true, is_request: false
+- "I moved to Yoco, not Takealot anymore" → is_update: true, is_request: false
+- "My email changed to sam@yoco.com" → is_update: true, is_request: false
+- "My new number is 082 555 1234" → is_update: true, is_request: false
+- "I heard Aaron Acosta is at JP Morgan now" → is_update: true, is_request: false (hearsay counts as an update)
+- "Someone told me Kara Davis got promoted to MD" → is_update: true, is_request: false
+- "Yesterday I confirmed that Aaron Acosta moved to JP Morgan" → is_update: true, is_request: false
+- "Just found out Sarah Chen left BCG" → is_update: true, is_request: false
+- "Just found out Aaron Acosta left Deloitte for JP Morgan" → is_update: true, is_request: false (leaving one company FOR another is an update, not a request)
+- "FYI David moved companies, he's at Blackstone now" → is_update: true, is_request: false
+- "Apparently Thabo is now a Partner at Deloitte" → is_update: true, is_request: false
+
+CRITICAL: is_update=true and is_request=true can NEVER both be true. Sharing news about someone is NEVER a request. If you can tell someone moved companies or got promoted, set is_update=true and is_request=false — even if their name appears in the message.
 
 Attribute name must be one of: company, title, email, phone, location, sector, specialty.
 
