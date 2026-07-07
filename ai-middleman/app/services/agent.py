@@ -28,7 +28,11 @@ class LLMAgent:
     def __init__(self):
         # Ordered list: Groq first (fast) when configured, Featherless as a
         # fallback if Groq's free-tier rate limit is exhausted mid-session.
-        self.configs = get_chat_configs()
+        # include_huggingface=False: tested unreliable for this call's large
+        # ~25-candidate JSON-ranking prompt (see get_chat_configs docstring) —
+        # stays enabled for intent_classifier/draft_generator, which have
+        # simpler prompts it handles cleanly.
+        self.configs = get_chat_configs(include_huggingface=False)
         self.max_retries = int(os.getenv("AGENT_MAX_ATTEMPTS", "3"))
         # Timeout/backoff are per-provider, not fixed once for the whole
         # instance — otherwise the Featherless fallback silently inherits
