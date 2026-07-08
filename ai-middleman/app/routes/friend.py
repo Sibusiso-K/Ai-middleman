@@ -435,8 +435,10 @@ async def _run_matching_and_push_draft(
         # flagged real ambiguity (match_quality weak/none) and gave a
         # specific question rather than a bare rejection — surface that
         # instead of the generic "nothing great" line, so Sam can narrow
-        # down the request rather than the system silently guessing.
-        emit("drafting", "✍️ Asking a clarifying question instead of guessing")
+        # down the request rather than the system silently guessing. Its own
+        # pipeline stage (not "drafting") so the dashboard visibly shows the
+        # system choosing to ask instead of guessing, not just "writing a draft".
+        emit("clarifying", "❓ Not confident enough — asking Sam to clarify instead of guessing")
         draft = clarification_question
     else:
         emit("drafting", "✍️ No match and no clarification offered — using fallback")
