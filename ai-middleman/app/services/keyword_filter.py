@@ -29,11 +29,14 @@ import asyncpg
 # free tier the matching prompt shares a 6,000-tokens-per-minute budget, and a
 # 25-candidate prompt (~6k tokens) alone maxed it out — so a single match
 # consumed a whole minute and any second call in that window 429'd, forcing the
-# slow/flaky Featherless fallback. Twelve candidates (~3.7k tokens) keeps the
-# call inside Groq's budget so the fast, reliable provider serves matching. The
-# accuracy cost is minimal because Stage 1 already sorts by relevance_score, so
-# the dropped rows are the least-relevant of the shortlist, not the best ones.
-CANDIDATE_LIMIT = 12
+# slow/flaky Featherless fallback. Five candidates (~1.7k tokens) leaves
+# headroom for a couple of matches within the same minute, cutting demand
+# further than the earlier 12-candidate step. Stage 1 already sorts by
+# relevance_score, so this is always the top-5 most relevant rows, not an
+# arbitrary cut — the LLM only ever has to choose among genuinely strong
+# candidates, which is also what keeps its confidence scores meaningful
+# rather than padded out with marginal filler rows.
+CANDIDATE_LIMIT = 5
 
 # Filler / intent / greeting words that carry no matching signal. Left in, they
 # turn into search terms that match most of the 50k contacts (e.g. "can" or

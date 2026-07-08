@@ -406,16 +406,19 @@ async def _run_matching_and_push_draft(
     emit("matching", f"🔗 Searching contacts for: \"{search_query}\"")
     result = await engine.match(search_query, candidates=candidates)
     all_matches = result.get("matches", [])
-    viable = [m for m in all_matches if m.get("confidence", 0) >= 0.5]
-    emit("matching", f"🔗 Found {len(viable)} good match(es)" if viable else "🔗 No confident match found")
+    # 0.7 (not 0.5) is the bar for "directly related" — matches agent.py's own
+    # CONFIDENCE SCORE GUIDE, where 0.7-0.89 is the first band that "genuinely
+    # does the requested role/sector" rather than merely being adjacent to it
+    # (0.5-0.69 is explicitly a "partial match" band: right role but off on
+    # location/seniority). Below that, Sam should be asked a clarifying
+    # question instead of being confidently pointed at a loose fit.
+    viable = [m for m in all_matches if m.get("confidence", 0) >= 0.7]
+    emit("matching", f"🔗 Found {len(viable)} strong match(es)" if viable else "🔗 No directly-related match found")
 
-    # The matching LLM call already wrote the draft in the same round-trip
-    # (see agent.py's draft_reply field) — only fall back to a second,
-    # separate LLM call if it came back empty for some reason.
-    draft = result.get("draft_reply") or ""
-    if draft:
-        emit("drafting", "✍️ Draft written in the same pass as matching")
-    else:
+    clarification_question = (result.get("clarification_question") or "").strip()
+    if viable:
+        # The separate DraftGenerator call below writes the "here are some
+        # people" message in Alex's voice.
         generator = DraftGenerator()
         emit("drafting", "✍️ Writing a suggested reply")
         recent_events = await manager.get_recent_events(thread_id, limit=20)
@@ -427,6 +430,17 @@ async def _run_matching_and_push_draft(
             is_first_message=is_first_message,
             language=language,
         )
+    elif clarification_question:
+        # Nothing cleared the "directly related" bar, but the matching LLM
+        # flagged real ambiguity (match_quality weak/none) and gave a
+        # specific question rather than a bare rejection — surface that
+        # instead of the generic "nothing great" line, so Sam can narrow
+        # down the request rather than the system silently guessing.
+        emit("drafting", "✍️ Asking a clarifying question instead of guessing")
+        draft = clarification_question
+    else:
+        emit("drafting", "✍️ No match and no clarification offered — using fallback")
+        draft = "Nothing great in my network for this one — let me ask around and get back to you 🤔"
 
     event_id = await manager.add_event(thread_id, "draft_suggested", {
         "original_message": request_text,

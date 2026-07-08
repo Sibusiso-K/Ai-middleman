@@ -254,7 +254,7 @@ TRUTHFULNESS RULES — CRITICAL:
 - If the user did not specify a location, do NOT mention location at all in your reasoning.
 - Only reference criteria that the user actually asked for.
 
-IMPORTANT: Be discriminating. Return at most the top 3 matches, not 5 — quality over quantity. If no contact scores above 0.5, set match_quality to "weak". If none score above 0.3, set match_quality to "none" and ask a clarifying question.
+IMPORTANT: Be discriminating. Return at most the top 3 matches, not 5 — quality over quantity. If no contact scores above 0.5, set match_quality to "weak" AND write a genuinely useful clarification_question — one specific, short question that would let you tell the difference between the candidates you saw, or narrow down what's actually needed (e.g. "Are you after someone hands-on with tenant/landlord deals, or more the investment side?" if the candidates were all investment-side but the ask was ambiguous about that). If none score above 0.3, set match_quality to "none" and ask a clarifying question about what's missing entirely. Never leave clarification_question empty when match_quality is "weak" or "none".
 
 Keep all text SHORT — this is read on a phone. Be concise everywhere.
 
@@ -273,7 +273,7 @@ Respond ONLY with this exact JSON structure:
         }}
     ],
     "match_quality": "good",
-    "clarification_question": ""
+    "clarification_question": "Only non-empty when match_quality is weak or none — a short, specific question, not a generic apology."
 }}
 
 Sort matches by confidence score descending. Maximum 3 matches. Only include contacts scoring above 0.3."""
