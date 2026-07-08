@@ -279,7 +279,11 @@ async def _handle_followup_selection(db_pool, thread_id: int, text: str, whatsap
          "title": p["title"], "company": p["company"]}
         for p in picked
     ]
-    draft = await generator.generate_details_draft(contacts_for_draft)
+    recent_events = await manager.get_recent_events(thread_id, limit=20)
+    history, is_first_message = _format_history_for_draft(recent_events)
+    draft = await generator.generate_details_draft(
+        contacts_for_draft, conversation_history=history, is_first_message=is_first_message
+    )
 
     event_id = await manager.add_event(thread_id, "draft_suggested", {
         "original_message": text,
@@ -544,12 +548,18 @@ async def _process_sam_message(db_pool, thread_id: int, text: str, friend_event_
                             f"📧 {c['email']}" if c["email"] else None,
                         ]))
                         generator = DraftGenerator()
-                        draft = await generator.generate_details_draft([{
-                            "full_name": c["full_name"],
-                            "details_str": details_str,
-                            "title": c["title"],
-                            "company": c["company"],
-                        }])
+                        recent_events = await manager.get_recent_events(thread_id, limit=20)
+                        history, is_first_message = _format_history_for_draft(recent_events)
+                        draft = await generator.generate_details_draft(
+                            [{
+                                "full_name": c["full_name"],
+                                "details_str": details_str,
+                                "title": c["title"],
+                                "company": c["company"],
+                            }],
+                            conversation_history=history,
+                            is_first_message=is_first_message,
+                        )
                         emit("named_lookup", f"🔍 Sam confirmed — pulling {c['full_name'].split()[0]}'s details")
                         event_id = await manager.add_event(thread_id, "draft_suggested", {
                             "original_message": text,

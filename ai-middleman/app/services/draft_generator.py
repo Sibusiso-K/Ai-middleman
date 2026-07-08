@@ -205,6 +205,8 @@ Sound genuine, personal, and confident."""
         self,
         contacts: List[Dict[str, Any]],
         language: str = "English",
+        conversation_history: str = "",
+        is_first_message: bool = False,
     ) -> str:
         """Generate a varied, Alex-voice reply that hands Sam the actual
         contact details (phone/email). Each contact dict must have at least
@@ -212,7 +214,15 @@ Sound genuine, personal, and confident."""
         Optional: title, company.
 
         Unlike generate_draft(), PII is included — this is the delivery
-        message after Sam has already picked and Alex has approved sending."""
+        message after Sam has already picked and Alex has approved sending.
+
+        conversation_history and is_first_message mirror generate_draft() —
+        without them this always opened with "Hey Sam" even mid-thread,
+        because a details draft is by definition a reply to an existing pick,
+        never the opening line of a conversation. is_first_message therefore
+        defaults to False here (the opposite of generate_draft's default),
+        since the only way this method gets called is after at least one
+        prior turn (Sam asked, Alex was already offered a suggestion)."""
         if not contacts:
             return "Here you go! Let me know how it goes 🤝"
 
@@ -238,6 +248,21 @@ Sound genuine, personal, and confident."""
             if language == "English" else
             f"Reply in {language}. Keep contact names, job titles, and company names in English."
         )
+        opener_rule = (
+            "This is the first message in the conversation, so a brief natural "
+            "opener (e.g. \"Hey\") is fine."
+            if is_first_message else
+            "This is an ONGOING conversation — you've already been chatting with "
+            "Sam, most likely about this exact contact a moment ago. Do NOT open "
+            "with \"Hey\", \"Hey Sam\", \"Hi\", or any greeting; reply the way a "
+            "real person continues a text thread, picking up naturally from what "
+            "was just said (e.g. straight into \"Here's...\", \"Got it...\", "
+            "\"Alright...\")."
+        )
+        history_block = (
+            f"\nConversation so far (oldest to newest):\n{conversation_history}\n"
+            if conversation_history else ""
+        )
 
         plural = len(contacts) > 1
         prompt = f"""You are writing a WhatsApp message for Alex, a well-connected business professional, handing over real contact details to his friend Sam.
@@ -249,11 +274,13 @@ Alex's style:
 - Vouches personally for the people he introduces
 - Never formal, never "I hope this helps", never stiff sign-offs
 - Varies his phrasing each time — does not always say "Tell them I sent you"
-
+{history_block}
 Contact details to include EXACTLY as written (do NOT change or omit them):
 {contact_block}
 
 {"The user asked for multiple people." if plural else "The user asked for this one person."}
+
+{opener_rule}
 
 {language_rule}
 
