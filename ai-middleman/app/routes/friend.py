@@ -46,9 +46,18 @@ EDIT_FLOW_ID = os.getenv("WHATSAPP_EDIT_FLOW_ID")
 
 # Fast, LLM-free detector for "send me their details" follow-ups — no need to
 # wait on an intent-classifier round trip for a pattern this unambiguous.
+# Also catches "introduce me" / "connect me" style asks with no name and no
+# explicit "detail/contact" noun — these mean the same thing (give me the
+# intro to whoever was just suggested) but were previously falling through
+# both this check AND _resolve_selected_contacts's name/position/group-pronoun
+# matching (no name, no ordinal, no "them/their"), landing on the full
+# matching pipeline instead — which searched "okay, introduce me" as if it
+# were a brand-new request and found nothing, instead of resending the
+# single contact Sam just said yes to.
 _DETAILS_REQUEST_RE = re.compile(
     r"\b(send|share|give|forward)\b.{0,25}\b(detail|contact|number|phone|email|info)"
-    r"|\b(their|his|her)\s+(detail|contact|number|phone|email)",
+    r"|\b(their|his|her)\s+(detail|contact|number|phone|email)"
+    r"|\b(introduce me|connect me|connect us|hook me up|link me up|put me in touch)\b",
     re.IGNORECASE,
 )
 
