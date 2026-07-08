@@ -126,7 +126,8 @@ def _join_names(names: list) -> str:
 
 
 _GROUP_PRONOUN_RE = re.compile(
-    r"\b(both|all three|them all|everyone|all of (them|those|em)|them|dem|em|those|these)\b",
+    r"\b(both|all three|them all|everyone|all of (them|those|em|their)|all their|"
+    r"them|dem|em|those|these)\b",
     re.IGNORECASE,
 )
 

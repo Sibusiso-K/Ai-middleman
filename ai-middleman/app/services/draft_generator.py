@@ -263,6 +263,14 @@ Sound genuine, personal, and confident."""
             f"\nConversation so far (oldest to newest):\n{conversation_history}\n"
             if conversation_history else ""
         )
+        no_repeat_rule = (
+            "The conversation above likely already described why this person is a "
+            "good fit (their expertise, what they've been working on, etc.) — do "
+            "NOT restate those selling points again here. This message's only job "
+            "is handing over the contact info; keep it to a name/role tag and the "
+            "details, not a second pitch."
+            if conversation_history else ""
+        )
 
         plural = len(contacts) > 1
         prompt = f"""You are writing a WhatsApp message for Alex, a well-connected business professional, handing over real contact details to his friend Sam.
@@ -281,6 +289,8 @@ Contact details to include EXACTLY as written (do NOT change or omit them):
 {"The user asked for multiple people." if plural else "The user asked for this one person."}
 
 {opener_rule}
+
+{no_repeat_rule}
 
 {language_rule}
 
