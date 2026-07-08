@@ -469,6 +469,11 @@ async def _run_matching_and_push_draft(
         # network" followed by "connect me with the first one" would still
         # draft a confident intro to the contact that was just rejected.
         "matches": viable,
+        # Tagged so a follow-up reply ("investment side") can be recognised as
+        # answering THIS clarifying question and combined with original_message
+        # before rematching — otherwise the short reply gets searched standalone
+        # and loses all context of what was actually being clarified.
+        "draft_type": "clarification_question" if (clarification_question and not viable) else None,
     })
 
     # WhatsApp interactive messages can't mix reply buttons with a Flow
@@ -600,6 +605,27 @@ async def _process_sam_message(db_pool, thread_id: int, text: str, friend_event_
                 request_text=effective_request, display_text=effective_request,
             )
             return
+
+    # A substantive (non-affirmation) reply to the SYSTEM's own auto-generated
+    # clarifying question — e.g. Sam answers "investment side" to "tenant/
+    # landlord or investment side?" — must be combined with the original
+    # request that prompted the question, not matched standalone. Without
+    # this, a short answer like "investment side" gets searched on its own,
+    # loses all context of "real estate agents in London", and can match a
+    # completely different sector (seen live: matched energy/carbon-credit
+    # investment people instead of real estate). This only fires once per
+    # clarification — the rematch below produces a fresh draft_suggested
+    # event, so a later unrelated message won't see draft_type still set.
+    last_draft = await manager.get_last_draft_payload(thread_id)
+    if last_draft and last_draft.get("draft_type") == "clarification_question":
+        original = (last_draft.get("original_message") or "").strip()
+        combined_request = f"{original} — {text}".strip(" —") if original else text
+        slog(f"[Friend] Reply to clarifying question -> combining: {combined_request!r}")
+        await _run_matching_and_push_draft(
+            db_pool, thread_id, whatsapp,
+            request_text=combined_request, display_text=combined_request,
+        )
+        return
 
     # Intent classification (LLM) and keyword filtering (DB) don't depend on
     # each other, but used to run strictly in sequence — kick them off
