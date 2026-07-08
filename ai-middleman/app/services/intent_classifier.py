@@ -91,7 +91,7 @@ Do ALL FIVE of the following in one pass:
 
 1. Identify which language the message is written in: {languages_list} only — no other option exists. If it's already in English, is mostly English with just a greeting/aside in Afrikaans, is short/ambiguous, or you are not confident it is genuinely Afrikaans, say "English". Only say "Afrikaans" if you are confident the message is substantially written in Afrikaans.
 2. Decide: is this message asking Alex to introduce someone, recommend a contact, refer someone, or connect the sender with a person from Alex's professional network? (is_request)
-3. Decide: is this message sharing NEW factual information that should update a contact record — e.g. a new employer, new job title, new phone, new email, a promotion, or a location change? (is_update). This is DIFFERENT from a request. Updates include direct statements ("Aaron works at Deloitte now"), hearsay ("I heard Aaron moved to JP Morgan", "Someone told me Sarah got promoted"), past confirmations ("I confirmed that Kara moved to Bain Capital"), and discoveries ("Just found out David left BCG"). All of these are is_update=true, is_request=false. "I moved to Yoco" is an update about the sender themselves. A message is an update whenever it tells Alex that a fact has CHANGED — even if it names a specific person.
+3. Decide: is this message sharing NEW factual information that should update a contact record — e.g. a new employer, new job title, new phone, new email, a promotion, or a location change? (is_update). This is DIFFERENT from a request. Updates include direct statements ("Aaron works at Deloitte now"), hearsay ("I heard Aaron moved to JP Morgan", "Someone told me Sarah got promoted"), past confirmations ("I confirmed that Kara moved to Bain Capital"), and discoveries ("Just found out David left BCG"). All of these are is_update=true, is_request=false. "I moved to Yoco" is an update about the sender themselves. A message is an update whenever it tells Alex that a fact has CHANGED — even if it names a specific person. A trailing "?" or a "you know...?" wrapper does NOT automatically make it a request — "You know Aaron Lopez works at Boyden now...?" is a factual claim (Aaron changed jobs) tagged with a casual "?", not a bare question about whether Alex knows Aaron. Only treat a message as a named-contact REQUEST (not an update) when it is asking about someone's identity/existence with NO accompanying fact — "Do you know Aaron Lopez?" alone is a request; "You know Aaron Lopez works at Boyden now?" contains a fact (works at Boyden now) and is an update. The test: strip the "you know...?" wrapper — if what's left is a statement ("X works at Y now"), it's an update; if what's left is just a name with nothing else, it's a request.
 4. If is_request is true, decide whether the message is asking about ONE SPECIFIC NAMED PERSON Alex might know (not a role/skill/sector search). "Do you know Aaron Aguirre?" and "Do you have Sarah Chen's details?" name a specific individual — extract that name into named_contact. "Do you know any good lawyers?" and "Anyone senior at JPMorgan?" do NOT name a specific individual (they describe a role/company/sector) — named_contact is null for these, even though they ARE still is_request=true.
 5. Give an English rendering of the message. If it's already in English, repeat it unchanged. Translate meaning, not word-for-word — keep any names, companies, and locations exactly as written.
 
@@ -127,8 +127,9 @@ is_update examples (TRUE, is_request MUST be false — these are news, not reque
 - "Apparently Thabo is now a Partner at Deloitte" → is_update: true, is_request: false
 - "you know i work at Deloitte now, Alex" → is_update: true, is_request: false (self-update about the sender; "Alex" here is just addressing the recipient by name, like saying "you know" or "hey" — it does NOT make this a request)
 - "just so you know Sarah, I'm at BCG now" → is_update: true, is_request: false (same pattern: a name inside a casual aside is address, not a request)
+- "You know aaron lopez works at boyden now...?" → is_update: true, is_request: false (contains a fact — Aaron now works at Boyden — the trailing "?" and "you know" are conversational tags, not a genuine "do you know this person" question; named_contact stays null since this is not a request)
 
-CRITICAL: is_update=true and is_request=true can NEVER both be true. Sharing news about someone is NEVER a request. If you can tell someone moved companies or got promoted, set is_update=true and is_request=false — even if their name appears in the message. A message ending or starting with someone's name as a casual address ("...now, Alex", "hey Alex, ...") is NEVER itself a signal of is_request — judge intent from the rest of the sentence. "I work at X now, Alex" is purely informational (is_update); it only becomes a request if it ALSO asks Alex to do something ("...Alex, know anyone there?").
+CRITICAL: is_update=true and is_request=true can NEVER both be true — this is a hard constraint, not a preference. Sharing news about someone is NEVER a request. If you can tell someone moved companies, got promoted, or changed any factual detail, set is_update=true and is_request=false, FULL STOP — even if the message ends in "?", even if their name appears in the message, even if it superficially resembles "do you know X?". A trailing question mark on a factual statement ("X works at Y now?", "X moved to Y, right?") is a verbal tic, not a real question — it does NOT flip is_request to true or override is_update. When BOTH could arguably apply, is_update always wins: set is_update=true, is_request=false, named_contact=null. A message ending or starting with someone's name as a casual address ("...now, Alex", "hey Alex, ...") is NEVER itself a signal of is_request — judge intent from the rest of the sentence. "I work at X now, Alex" is purely informational (is_update); it only becomes a request if it ALSO asks Alex to do something ("...Alex, know anyone there?").
 
 Attribute name must be one of: company, title, email, phone, location, sector, specialty.
 
@@ -188,11 +189,25 @@ If no specific person is named for a request, set named_contact to null."""
                                 slog(f"[Intent] model said Afrikaans but text looks Nguni, not Afrikaans — defaulting to English: {message[:60]!r}")
                                 detected_language = "English"
                             is_update = bool(data.get("is_update"))
+                            is_request = bool(data.get("is_request"))
                             named_contact = data.get("named_contact") or None
-                            if isinstance(named_contact, str) and not named_contact.strip():
+                            # Small models occasionally write the literal string
+                            # "null" instead of the JSON keyword — treat it the
+                            # same as a genuinely empty value.
+                            if isinstance(named_contact, str) and (not named_contact.strip() or named_contact.strip().lower() == "null"):
+                                named_contact = None
+                            # Hard constraint, enforced here too (not just via
+                            # prompt instruction): is_update and is_request can
+                            # never both be true. Seen live, the model sometimes
+                            # returns both true on a factual statement tagged
+                            # with a trailing "?" — is_update always wins, since
+                            # sharing news is never itself a request.
+                            if is_update and is_request:
+                                slog(f"[Intent] model returned both is_update and is_request — forcing is_request=False (update wins): {message[:60]!r}")
+                                is_request = False
                                 named_contact = None
                             result = {
-                                "is_request": bool(data.get("is_request")),
+                                "is_request": is_request,
                                 "is_update": is_update,
                                 "named_contact": named_contact,
                                 "language": detected_language,
