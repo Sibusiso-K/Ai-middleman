@@ -46,6 +46,31 @@ def _looks_nguni_not_afrikaans(text: str) -> bool:
     return bool(_NGUNI_MARKERS_RE.search(text))
 
 
+# Deterministic backstop for a distinct failure mode seen live during demo
+# prep: "oh also heard David Chen moved to Google" — a textbook hearsay-update
+# pattern that's already spelled out in this very prompt's own examples ("I
+# heard Aaron Acosta is at JP Morgan now" -> is_update: true) — still came
+# back is_request=True, named_contact='David Chen', treating fresh news about
+# someone's job change as if Sam were asking "do you know this person?". If
+# the message names a real person (two consecutive Title-Case words) AND
+# contains an unambiguous job-change verb phrase, force is_update=True /
+# is_request=False / named_contact=None regardless of what the model said —
+# mirroring the is_update-always-wins hard constraint already enforced below
+# for the both-true case. Deliberately requires a real name (not "anyone"/
+# "someone") so a genuine request like "know any good lawyers who moved to
+# Dubai recently" is untouched — that phrasing never names a specific person.
+_JOB_CHANGE_VERB_RE = re.compile(
+    r"\b(moved to|moved companies|joined|is\s+(?:now\s+)?at\b|left\s+\w+|"
+    r"got promoted|promoted to|is now (?:a|an)?\s*\w|works?\s+at\b.{0,30}\bnow\b)\b",
+    re.IGNORECASE,
+)
+_PROPER_NAME_RE = re.compile(r"\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)+)\b")
+
+
+def _looks_like_job_change_update(text: str) -> bool:
+    return bool(_JOB_CHANGE_VERB_RE.search(text) and _PROPER_NAME_RE.search(text))
+
+
 class IntentClassificationError(Exception):
     """Raised when the classifier could not reach a verdict (LLM unreachable/
     timing out after retries). Callers should decide how to fail — never treat
@@ -205,6 +230,17 @@ If no specific person is named for a request, set named_contact to null."""
                             # sharing news is never itself a request.
                             if is_update and is_request:
                                 slog(f"[Intent] model returned both is_update and is_request — forcing is_request=False (update wins): {message[:60]!r}")
+                                is_request = False
+                                named_contact = None
+                            elif not is_update and _looks_like_job_change_update(message):
+                                # See _looks_like_job_change_update docstring — a
+                                # named person + an unambiguous job-change verb
+                                # phrase is news, not a request, no matter what the
+                                # model concluded (seen live: "heard David Chen
+                                # moved to Google" came back as a named-contact
+                                # lookup request instead of an update).
+                                slog(f"[Intent] message names someone + a job-change phrase but model said is_update=False — forcing is_update=True: {message[:60]!r}")
+                                is_update = True
                                 is_request = False
                                 named_contact = None
                             result = {

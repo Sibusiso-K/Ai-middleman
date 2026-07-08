@@ -90,13 +90,27 @@ def _mentions_unmatched_name(text: str, matches: list) -> bool:
     return any(name.split()[0].lower() not in known_first_names for name in found)
 
 
-# Short, whole-message confirmations — used to detect "yeah"/"yep"/"correct"
-# replying to Alex's own clarifying question ("Oh you mean AI consulting?").
-_AFFIRMATION_RE = re.compile(
-    r"^\s*(yeah|yea|yeh|yes|yep|yup|sure|ok|okay|correct|right|exactly|"
-    r"that'?s (it|right|correct))[.!]*\s*$",
-    re.IGNORECASE,
+# Short confirmations — used to detect "yeah"/"yep"/"correct" replying to a
+# clarifying question ("Oh you mean AI consulting?") OR to a named-contact
+# confirmation ("Yeah I know Pamela, that who you're after?"). Must accept a
+# short confirming TAIL after the lead word ("yeah that's her", "yep thats the
+# one", "yeah her") — seen live, "yeah thats her" fell through to the full
+# matching pipeline (which found nothing) instead of releasing the confirmed
+# contact's details, because the old regex demanded the whole message be a
+# single bare affirmation word. The tail is deliberately restricted to
+# pronouns / "that's the one"-style phrases so a real follow-up request that
+# merely starts with "yeah" ("yeah connect me with John", "yes I need a
+# lawyer") is NOT swallowed — those are handled by the earlier pick/pipeline
+# paths and must keep reaching them.
+_AFFIRM_LEAD = (
+    r"(?:yeah|yea|yeh|yes|yep|yup|sure|ok|okay|correct|right|exactly|perfect|"
+    r"cool|definitely|(?:that'?s|that is)\s+(?:it|right|correct|her|him|them|the one|the guy))"
 )
+_AFFIRM_TAIL = (
+    r"(?:[,\s]+(?:(?:that'?s|that is)\s+)?"
+    r"(?:her|him|them|the one|the guy|it|right|correct|perfect|please))*"
+)
+_AFFIRMATION_RE = re.compile(rf"^\s*{_AFFIRM_LEAD}{_AFFIRM_TAIL}[.!\s]*$", re.IGNORECASE)
 
 
 def _looks_like_affirmation(text: str) -> bool:
@@ -400,6 +414,7 @@ async def _run_matching_and_push_draft(
     candidates: list | None = None,
     search_query: str | None = None,
     language: str = "English",
+    allow_clarification_followup: bool = True,
 ):
     """Run the matching+draft pipeline for request_text and push a Send/Skip
     draft to Alex. display_text is what's shown as "{FRIEND_NAME} asked" (may
@@ -413,7 +428,19 @@ async def _run_matching_and_push_draft(
     against English contact data. request_text (Sam's own words) is always
     what gets stored/shown and what the draft is generated in reply to, so
     Alex sees the real conversation, not a translation. language drives which
-    language DraftGenerator replies in."""
+    language DraftGenerator replies in.
+
+    allow_clarification_followup gates whether a NEW clarification_question
+    produced by this call is itself eligible to be combined with Sam's next
+    reply (see the "Reply to clarifying question" handling below). Pass False
+    when this call is ITSELF already resolving a combined follow-up — without
+    this cap, a clarification that fails to resolve twice in a row would keep
+    concatenating every subsequent Sam message onto an ever-growing garbled
+    query forever (seen live: "yeah thats her — do you have Pamela Franklin
+    details? — do you have Pamela Franklin details?" ...). Capping to one
+    combine means a clarification that still doesn't land just asks fresh —
+    which matches the "only fires once per clarification" intent this was
+    always meant to have."""
     manager = ConversationManager(db_pool)
     engine = MatchingEngine(db_pool)
     search_query = search_query or request_text
@@ -472,8 +499,14 @@ async def _run_matching_and_push_draft(
         # Tagged so a follow-up reply ("investment side") can be recognised as
         # answering THIS clarifying question and combined with original_message
         # before rematching — otherwise the short reply gets searched standalone
-        # and loses all context of what was actually being clarified.
-        "draft_type": "clarification_question" if (clarification_question and not viable) else None,
+        # and loses all context of what was actually being clarified. Gated by
+        # allow_clarification_followup so a combine-that-still-failed can't be
+        # combined again (see the docstring above).
+        "draft_type": (
+            "clarification_question"
+            if (clarification_question and not viable and allow_clarification_followup)
+            else None
+        ),
     })
 
     # WhatsApp interactive messages can't mix reply buttons with a Flow
@@ -624,6 +657,11 @@ async def _process_sam_message(db_pool, thread_id: int, text: str, friend_event_
         await _run_matching_and_push_draft(
             db_pool, thread_id, whatsapp,
             request_text=combined_request, display_text=combined_request,
+            # Cap combining to one level deep — if this combined query still
+            # doesn't resolve, the NEW draft must not itself be tagged
+            # combinable, or every later message would keep concatenating
+            # onto an ever-growing garbled query (see docstring).
+            allow_clarification_followup=False,
         )
         return
 
