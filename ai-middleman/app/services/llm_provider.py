@@ -78,7 +78,7 @@ def get_chat_configs(include_huggingface: bool = True) -> list[dict]:
     sustained traffic (see module docstring).
 
     include_huggingface defaults to True but agent.py (Stage 2 matching)
-    explicitly passes False: tested against the real ~25-candidate matching
+    explicitly passes False: tested against the real multi-candidate matching
     prompt, this HF fallback only reached valid JSON on roughly 1 of 3 calls
     (it frequently narrates prose analysis and never emits the JSON at all,
     even with a larger max_tokens budget) — unreliable for the one call site

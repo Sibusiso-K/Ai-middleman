@@ -12,7 +12,7 @@ happened to contain any word"):
      search. Otherwise those common words match huge swaths of the DB.
   2. Relevance-scored ordering — rows are ranked by a weighted count of which
      high-signal fields (title, expertise, sector...) actually match the query
-     terms, so the genuinely relevant contact isn't cut from the top-25 by a
+     terms, so the genuinely relevant contact isn't cut from the shortlist by a
      random high-relationship VIP that merely shared a word.
 
 Location-aware: queries containing city/country names prioritise geographically
@@ -25,9 +25,15 @@ import re
 from typing import List, Dict
 import asyncpg
 
-# Max candidates passed to the LLM ranker. Kept small enough to keep the
-# Stage-2 prompt within reliable single-response size for an 8B model.
-CANDIDATE_LIMIT = 25
+# Max candidates passed to the LLM ranker. Kept deliberately small: on Groq's
+# free tier the matching prompt shares a 6,000-tokens-per-minute budget, and a
+# 25-candidate prompt (~6k tokens) alone maxed it out — so a single match
+# consumed a whole minute and any second call in that window 429'd, forcing the
+# slow/flaky Featherless fallback. Twelve candidates (~3.7k tokens) keeps the
+# call inside Groq's budget so the fast, reliable provider serves matching. The
+# accuracy cost is minimal because Stage 1 already sorts by relevance_score, so
+# the dropped rows are the least-relevant of the shortlist, not the best ones.
+CANDIDATE_LIMIT = 12
 
 # Filler / intent / greeting words that carry no matching signal. Left in, they
 # turn into search terms that match most of the 50k contacts (e.g. "can" or

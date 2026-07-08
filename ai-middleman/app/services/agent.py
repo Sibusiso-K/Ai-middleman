@@ -1,7 +1,7 @@
 """
 agent.py — Stage 2 of the two-stage matching pipeline.
 
-Sends the keyword filter's candidates (up to CANDIDATE_LIMIT, currently 25) to
+Sends the keyword filter's candidates (up to CANDIDATE_LIMIT, currently 12) to
 an LLM (Groq's Llama 3.1 8B, with a Featherless fallback) for intelligent
 ranking. The LLM evaluates each candidate against the user's query using strict
 scoring rules and returns ranked matches with confidence scores and
@@ -29,7 +29,7 @@ class LLMAgent:
         # Ordered list: Groq first (fast) when configured, Featherless as a
         # fallback if Groq's free-tier rate limit is exhausted mid-session.
         # include_huggingface=False: tested unreliable for this call's large
-        # ~25-candidate JSON-ranking prompt (see get_chat_configs docstring) —
+        # multi-candidate JSON-ranking prompt (see get_chat_configs docstring) —
         # stays enabled for intent_classifier/draft_generator, which have
         # simpler prompts it handles cleanly.
         self.configs = get_chat_configs(include_huggingface=False)
