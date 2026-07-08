@@ -125,8 +125,10 @@ is_update examples (TRUE, is_request MUST be false — these are news, not reque
 - "Just found out Aaron Acosta left Deloitte for JP Morgan" → is_update: true, is_request: false (leaving one company FOR another is an update, not a request)
 - "FYI David moved companies, he's at Blackstone now" → is_update: true, is_request: false
 - "Apparently Thabo is now a Partner at Deloitte" → is_update: true, is_request: false
+- "you know i work at Deloitte now, Alex" → is_update: true, is_request: false (self-update about the sender; "Alex" here is just addressing the recipient by name, like saying "you know" or "hey" — it does NOT make this a request)
+- "just so you know Sarah, I'm at BCG now" → is_update: true, is_request: false (same pattern: a name inside a casual aside is address, not a request)
 
-CRITICAL: is_update=true and is_request=true can NEVER both be true. Sharing news about someone is NEVER a request. If you can tell someone moved companies or got promoted, set is_update=true and is_request=false — even if their name appears in the message.
+CRITICAL: is_update=true and is_request=true can NEVER both be true. Sharing news about someone is NEVER a request. If you can tell someone moved companies or got promoted, set is_update=true and is_request=false — even if their name appears in the message. A message ending or starting with someone's name as a casual address ("...now, Alex", "hey Alex, ...") is NEVER itself a signal of is_request — judge intent from the rest of the sentence. "I work at X now, Alex" is purely informational (is_update); it only becomes a request if it ALSO asks Alex to do something ("...Alex, know anyone there?").
 
 Attribute name must be one of: company, title, email, phone, location, sector, specialty.
 

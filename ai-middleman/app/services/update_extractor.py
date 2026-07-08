@@ -81,7 +81,7 @@ async def extract_update_target(message: str) -> dict:
     Returns a dict with the three keys; values may be None/empty if extraction
     fails, which apply_update handles gracefully.
     """
-    prompt = f"""Extract the contact-record update from this WhatsApp message.
+    prompt = f"""Extract the contact-record update from this WhatsApp message, sent TO Alex by a friend in his network.
 
 The message shares new factual information about a contact in someone's professional network.
 
@@ -90,6 +90,8 @@ Extract:
 - attribute: what is changing. Must be exactly one of: company, title, email, phone, location, sector, specialty.
 - new_value: the new value, exactly as stated (no paraphrasing).
 
+CRITICAL: "Alex" is always the RECIPIENT of this message (the network owner), never the subject of the update. If "Alex" appears in the message, it is the sender addressing him by name ("...now, Alex", "hey Alex, ...") — like saying "hey" or "you know" — and must NEVER be extracted as contact_name. A message like "I work at Deloitte now, Alex" is the SENDER updating their own info (contact_name: null), not information about a person named Alex.
+
 Examples:
 - "Aaron Acosta works at Deloitte now" → {{"contact_name": "Aaron Acosta", "attribute": "company", "new_value": "Deloitte"}}
 - "Kara Davis left Andreessen Horowitz, she is at Bain Capital now" → {{"contact_name": "Kara Davis", "attribute": "company", "new_value": "Bain Capital"}}
@@ -97,6 +99,7 @@ Examples:
 - "I moved to Yoco, not Takealot anymore" → {{"contact_name": null, "attribute": "company", "new_value": "Yoco"}}
 - "Sarah's new number is 082 555 1234" → {{"contact_name": "Sarah", "attribute": "phone", "new_value": "082 555 1234"}}
 - "My email is now sam@newcompany.com" → {{"contact_name": null, "attribute": "email", "new_value": "sam@newcompany.com"}}
+- "you know i work at Deloitte now, Alex" → {{"contact_name": null, "attribute": "company", "new_value": "Deloitte"}} (self-update; "Alex" is the recipient being addressed, not the subject)
 
 Message: "{message}"
 
