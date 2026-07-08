@@ -110,9 +110,9 @@ async def receive_webhook(request: Request):
 
 
 async def route_message(db_pool, value: dict):
-    """Route an inbound message. In Phase 2 all inbound traffic is Alex acting
-    on his real WhatsApp; the thread is the single Sam<->Alex conversation,
-    keyed by Alex's number."""
+    """Route an inbound message. Each sender (contact) gets their own
+    conversation thread, keyed by sender_number. This allows multiple
+    contacts to text the business number independently."""
     messages = value.get("messages", [])
     if not messages:
         return
@@ -127,7 +127,7 @@ async def route_message(db_pool, value: dict):
         return
 
     manager = ConversationManager(db_pool)
-    thread = await manager.get_or_create_thread(ALEX_NUMBER)
+    thread = await manager.get_or_create_thread(sender)
     thread_id = thread["id"]
 
     # Interactive button reply (Send / Skip tap on a draft).
