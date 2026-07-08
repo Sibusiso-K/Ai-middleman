@@ -59,6 +59,22 @@ _AGENT_BROKER_QUERY_RE = re.compile(r"\b(agents?|brokers?)\b", re.IGNORECASE)
 _AGENT_BROKER_TITLE_RE = re.compile(r"\b(agent|broker|sales|leasing)\b", re.IGNORECASE)
 _AGENT_BROKER_CAP = 0.4
 
+# Carve-out for the cap above: when a clarifying-question follow-up combines
+# Sam's original message with their answer (see friend.py's
+# "Reply to clarifying question" handling), the original wording often still
+# contains "agent" even after Sam explicitly clarified they want the
+# INVESTMENT side, not a literal agent/broker — e.g. "need a real estate
+# agent in Dubai... investment side" combines both. Without this carve-out,
+# the cap above fires on the leftover word "agent" and wipes out exactly the
+# VP Investments / Chairman / MD candidates Sam just asked for, sending the
+# same clarifying question right back at them in a loop. If the query itself
+# also names the investment side explicitly, that disambiguation wins — the
+# cap must not undo it.
+_INVESTMENT_SIDE_DISAMBIGUATION_RE = re.compile(
+    r"\binvestment\s+side\b|\binvestor\s+side\b|\binstitutional\s+side\b",
+    re.IGNORECASE,
+)
+
 class LLMAgent:
     def __init__(self):
         # Ordered list: Groq first (fast) when configured, Featherless as a
@@ -157,7 +173,10 @@ class LLMAgent:
         real person — otherwise Sam could be told about one contact and handed
         a different one's details."""
         by_id = {c["id"]: c for c in candidates}
-        wants_agent_or_broker = bool(_AGENT_BROKER_QUERY_RE.search(query or ""))
+        wants_agent_or_broker = (
+            bool(_AGENT_BROKER_QUERY_RE.search(query or ""))
+            and not _INVESTMENT_SIDE_DISAMBIGUATION_RE.search(query or "")
+        )
         cleaned = []
         for m in parsed.get("matches", []) or []:
             cid = m.get("contact_id")
