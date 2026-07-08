@@ -13,6 +13,7 @@ Exposed: LLMAgent class with evaluate_matches(query, candidates) method.
 import httpx
 import os
 import json
+import re
 import asyncio
 from typing import Dict, Any, List
 from dotenv import load_dotenv
@@ -23,6 +24,40 @@ from app.services.llm_json import extract_json
 from app.log_safe import slog
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
+
+# Deterministic backstop, not just a prompt instruction: the prompt already
+# tells the model that reasoning containing words like "somewhat related"
+# means the score must be below 0.5 — but seen live, the model sometimes
+# writes exactly that self-diagnosis in the reasoning text and then still
+# outputs a confidence of 0.5-0.7 anyway (e.g. "his expertise is more
+# focused on multifamery and asset management, which is somewhat related to
+# the user's request" scored 0.7). Never trust the number over the model's
+# own words — if the reasoning admits a weak/loose/tangential match, cap the
+# confidence below the 0.5 viability gate regardless of what score it wrote.
+_WEAK_ADMISSION_RE = re.compile(
+    r"\b(somewhat related|loosely related|tangentially related|only loosely|"
+    r"not directly related|not a direct match|not directly what|"
+    r"adjacent to|could still help|isn'?t (?:a |an )?(?:direct|exact) match)\b",
+    re.IGNORECASE,
+)
+_WEAK_ADMISSION_CAP = 0.45
+
+# Second deterministic backstop, for a distinct failure mode: seen live, the
+# model reliably (not just occasionally) scores institutional real-estate
+# investment titles — Managing Director, Chairman, Partner, VP Investments,
+# Head of Acquisitions — as 0.6-0.9 matches for "real estate agent" requests,
+# even with that exact confusion spelled out by name in the prompt (STEP 2,
+# rule 1). Prompt wording alone did not fix it across repeated samples, so
+# this brokerage/agency distinction gets a hard rule: if the user asked for
+# an "agent" or "broker" specifically, a candidate whose title doesn't
+# contain that (or a close synonym — sales, leasing) is capped below the
+# viability gate, regardless of what confidence the model assigned. This is
+# deliberately narrow (only fires on this one query shape) rather than a
+# general title-matching heuristic, to avoid false-positiving on roles like
+# "lawyer" where a senior title (Partner, Counsel) legitimately IS the role.
+_AGENT_BROKER_QUERY_RE = re.compile(r"\b(agents?|brokers?)\b", re.IGNORECASE)
+_AGENT_BROKER_TITLE_RE = re.compile(r"\b(agent|broker|sales|leasing)\b", re.IGNORECASE)
+_AGENT_BROKER_CAP = 0.4
 
 class LLMAgent:
     def __init__(self):
@@ -82,7 +117,7 @@ class LLMAgent:
                     if response.status_code == 200:
                         content = response.json()["choices"][0]["message"]["content"]
                         try:
-                            return self._reconcile_matches(extract_json(content), candidates)
+                            return self._reconcile_matches(extract_json(content), candidates, query)
                         except json.JSONDecodeError as e:
                             # Malformed / non-JSON reply — retry (transient LLM behaviour).
                             slog(f"[Agent/{config['name']}] unparseable reply (attempt {attempt}/{self.max_retries}): {e}")
@@ -109,7 +144,7 @@ class LLMAgent:
         return self._fallback_response()
 
     @staticmethod
-    def _reconcile_matches(parsed: Dict[str, Any], candidates: List[Dict]) -> Dict[str, Any]:
+    def _reconcile_matches(parsed: Dict[str, Any], candidates: List[Dict], query: str = "") -> Dict[str, Any]:
         """Overwrite each match's display fields (name/title/company/location)
         with the authoritative candidate our own keyword filter supplied,
         looked up by contact_id, and drop any match whose id isn't a real
@@ -122,6 +157,7 @@ class LLMAgent:
         real person — otherwise Sam could be told about one contact and handed
         a different one's details."""
         by_id = {c["id"]: c for c in candidates}
+        wants_agent_or_broker = bool(_AGENT_BROKER_QUERY_RE.search(query or ""))
         cleaned = []
         for m in parsed.get("matches", []) or []:
             cid = m.get("contact_id")
@@ -138,7 +174,29 @@ class LLMAgent:
             m["title"] = c.get("title", m.get("title"))
             m["company"] = c.get("company", m.get("company"))
             m["location"] = c.get("location", m.get("location"))
+
+            reasoning = m.get("reasoning") or ""
+            confidence = m.get("confidence")
+            if isinstance(confidence, (int, float)) and confidence >= 0.5 and _WEAK_ADMISSION_RE.search(reasoning):
+                slog(f"[Agent] reasoning admits a weak match but confidence={confidence} — capping to {_WEAK_ADMISSION_CAP} ({m.get('name')!r}: {reasoning!r})")
+                m["confidence"] = _WEAK_ADMISSION_CAP
+
+            confidence = m.get("confidence")
+            if (
+                wants_agent_or_broker
+                and isinstance(confidence, (int, float))
+                and confidence >= 0.5
+                and not _AGENT_BROKER_TITLE_RE.search(m.get("title") or "")
+            ):
+                slog(f"[Agent] query asked for agent/broker but title={m.get('title')!r} isn't one — capping confidence={confidence} to {_AGENT_BROKER_CAP} ({m.get('name')!r})")
+                m["confidence"] = _AGENT_BROKER_CAP
+
             cleaned.append(m)
+        # Viability gate: only surface matches that actually cleared 0.5 —
+        # the admission-cap above can knock a match below the bar after the
+        # model already returned it, so drop those here rather than let a
+        # self-admitted weak match reach the caller.
+        cleaned = [m for m in cleaned if (m.get("confidence") or 0) >= 0.3]
         parsed["matches"] = cleaned
         if not cleaned and parsed.get("match_quality") != "none":
             parsed["match_quality"] = "none"
@@ -173,7 +231,7 @@ First, determine what the user is actually asking for. Identify:
 - Does the query specify a SENIORITY level?
 
 STEP 2 — SCORING RULES (apply strictly, only use factors the user actually requested):
-1. ROLE/SKILL MATCH (always primary): Does their title, expertise, and what they can help with directly match what the user needs? A contact whose ACTUAL role/skill does not do what the user asked for must score BELOW 0.5 — no matter how senior, VIP, or well-connected they are. A great tech founder is NOT a match for a "hedge fund" request; a marketer is NOT a match for a "lawyer" request.
+1. ROLE/SKILL MATCH (always primary): Does their title, expertise, and what they can help with directly match what the user needs? A contact whose ACTUAL role/skill does not do what the user asked for must score BELOW 0.5 — no matter how senior, VIP, or well-connected they are. A great tech founder is NOT a match for a "hedge fund" request; a marketer is NOT a match for a "lawyer" request. This applies WITHIN a sector too, not just across sectors: being in the right industry does not mean being the right role in it. A "real estate agent" (someone who lists, shows, and sells/leases property directly to individual clients) is a DIFFERENT job from an institutional real estate investment role — Chairman, Managing Director, Partner, VP Investments, Head of Acquisitions, asset manager, or developer at a real estate firm are all investment-side roles, not agents/brokers, and score BELOW 0.5 for an "agent" request even though the company itself is a real estate company. If NONE of the candidates' titles are actually the specific role asked for, say so honestly (match_quality "weak" or "none") rather than offering the closest-sounding titles as if they were a match.
 2. LOCATION MATCH (only if user specified a location): If the user specified a city or country, contacts in that location score higher. A contact in the wrong location should NEVER score above 0.6. If NO location was specified, ignore location entirely — do not penalize or reward based on location. Being in the right city does NOT rescue a wrong-role contact — right city + wrong role is still below 0.5.
 3. SECTOR MATCH (only if user specified a sector): If the user asked for a specific industry, match on that. A contact in a DIFFERENT sector than the one requested must score BELOW 0.5.
 4. SENIORITY: More senior contacts (Partner, MD, Director) are preferred over junior ones for the same role.
