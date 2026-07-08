@@ -548,6 +548,22 @@ async def _run_matching_and_push_draft(
 
 
 async def _process_sam_message(db_pool, thread_id: int, text: str, friend_event_id: int):
+    """Thin safety wrapper around _process_sam_message_impl. Runs as a
+    FastAPI BackgroundTask, which means an unhandled exception here is NOT
+    logged or surfaced anywhere by default — it just silently kills the task,
+    Alex never gets Sam's message forwarded or a draft, and there is zero
+    trace of what happened. Seen as a real risk during demo dry runs (a
+    transient WhatsApp/DB hiccup would go completely dark with no error).
+    Catch broadly, log the exception type/message, and tell the dashboard so
+    at minimum there's a visible signal instead of dead silence."""
+    try:
+        await _process_sam_message_impl(db_pool, thread_id, text, friend_event_id)
+    except Exception as e:
+        slog(f"[Friend] _process_sam_message crashed: {type(e).__name__}: {e}")
+        emit("error", f"⚠️ Something went wrong processing that message ({type(e).__name__}) — check server logs")
+
+
+async def _process_sam_message_impl(db_pool, thread_id: int, text: str, friend_event_id: int):
     """Relay Sam's message to Alex and run the intent/matching/draft pipeline.
     Runs as a background task so /friend/send returns instantly (the slow LLM
     calls no longer block the dashboard). friend_event_id is the already-

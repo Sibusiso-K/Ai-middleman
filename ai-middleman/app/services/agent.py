@@ -75,6 +75,27 @@ _INVESTMENT_SIDE_DISAMBIGUATION_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Third deterministic backstop, same shape as the agent/broker one above but
+# for a distinct gap found during demo dry runs: NO contact in this dataset
+# has a literal C-level title (CFO/CTO/CMO/COO/CEO — confirmed 0 rows for
+# all five, see generate_contacts.py's title vocabulary), so any "I need a
+# CFO" request can only ever be answered honestly with "nothing in my
+# network." The model doesn't reliably self-correct for this: given a
+# shortlist of Founders/Partners, it scored one Founder as a 0.7 CFO "match"
+# while, in the exact same response, capping a second Founder to 0.5 with
+# the reasoning "his role is not a CFO" — i.e. it recognised the mismatch for
+# one candidate but not the other. Cap any candidate whose title doesn't
+# contain the requested C-level abbreviation/spelled-out form below the
+# viability gate, so the honest "no CFO in my network" / clarifying-question
+# path fires instead of a confident wrong suggestion.
+_CLEVEL_QUERY_RE = re.compile(
+    r"\b(CFOs?|CTOs?|CMOs?|COOs?|CEOs?|"
+    r"chief\s+(?:financial|technology|marketing|operating|executive)\s+officers?)\b",
+    re.IGNORECASE,
+)
+_CLEVEL_TITLE_RE = _CLEVEL_QUERY_RE
+_CLEVEL_CAP = 0.4
+
 class LLMAgent:
     def __init__(self):
         # Ordered list: Groq first (fast) when configured, Featherless as a
@@ -177,6 +198,7 @@ class LLMAgent:
             bool(_AGENT_BROKER_QUERY_RE.search(query or ""))
             and not _INVESTMENT_SIDE_DISAMBIGUATION_RE.search(query or "")
         )
+        wants_clevel = bool(_CLEVEL_QUERY_RE.search(query or ""))
         cleaned = []
         for m in parsed.get("matches", []) or []:
             cid = m.get("contact_id")
@@ -209,6 +231,16 @@ class LLMAgent:
             ):
                 slog(f"[Agent] query asked for agent/broker but title={m.get('title')!r} isn't one — capping confidence={confidence} to {_AGENT_BROKER_CAP} ({m.get('name')!r})")
                 m["confidence"] = _AGENT_BROKER_CAP
+
+            confidence = m.get("confidence")
+            if (
+                wants_clevel
+                and isinstance(confidence, (int, float))
+                and confidence >= 0.5
+                and not _CLEVEL_TITLE_RE.search(m.get("title") or "")
+            ):
+                slog(f"[Agent] query asked for a C-level title but title={m.get('title')!r} isn't one — capping confidence={confidence} to {_CLEVEL_CAP} ({m.get('name')!r})")
+                m["confidence"] = _CLEVEL_CAP
 
             cleaned.append(m)
         # Viability gate: only surface matches that actually cleared 0.5 —
