@@ -115,7 +115,7 @@ function InboxPage() {
     <div className="h-[calc(100vh-3.5rem)] flex flex-col">
       <div className="px-6 pt-6 pb-3 flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Inbox</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Inbox: for Demo purposes</h1>
           <p className="text-sm text-muted-foreground">Review AI-drafted replies before they go out on WhatsApp.</p>
         </div>
         <div className="flex items-center rounded-xl bg-muted p-0.5">

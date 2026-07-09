@@ -124,7 +124,7 @@ function ContactsPage() {
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Contacts</h1>
-          <p className="text-muted-foreground mt-1 text-sm">Browse, enrich, and let AI find the right person in {total.toLocaleString()} contacts.</p>
+          <p className="text-muted-foreground mt-1 text-sm">Browse, enrich, and let AI find the right person in your network.</p>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => setShowMatcher((v) => !v)} className={`inline-flex items-center gap-2 h-9 px-3 rounded-xl text-sm ${showMatcher ? "bg-primary-soft text-primary-soft-foreground" : "bg-muted hover:bg-accent"}`}>
