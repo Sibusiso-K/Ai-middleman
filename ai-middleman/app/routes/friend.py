@@ -79,15 +79,21 @@ _PROPER_NAME_RE = re.compile(r"\b([A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)+)\b")
 def _mentions_unmatched_name(text: str, matches: list) -> bool:
     """True if text contains a full name that isn't one of the currently
     suggested matches — signals Sam is asking about someone NEW, so the
-    generic "resend last details" fallback must not claim this message."""
+    generic "resend last details" fallback must not claim this message.
+
+    Compares FULL names, not just first names — seen live, "Did you know
+    Aaron Lopez works at JP Morgan now?" shared a first name with a
+    previously-suggested "Aaron Adams" and was incorrectly treated as still
+    being about Aaron Adams. Two different people can share a first name;
+    only an exact full-name match should count as "already matched"."""
     found = _PROPER_NAME_RE.findall(text)
     if not found:
         return False
-    known_first_names = {
-        (m.get("name") or "").split()[0].lower()
+    known_full_names = {
+        (m.get("name") or "").strip().lower()
         for m in matches if m.get("name")
     }
-    return any(name.split()[0].lower() not in known_first_names for name in found)
+    return any(name.strip().lower() not in known_full_names for name in found)
 
 
 # Short confirmations — used to detect "yeah"/"yep"/"correct" replying to a
@@ -199,11 +205,30 @@ def _resolve_selected_contacts(text: str, matches: list) -> list:
         if re.search(rf"\b{re.escape(word)}\b", low):
             _add(idx)
 
+    # Full names actually mentioned in the message, e.g. ["Aaron Lopez"] —
+    # used below to stop a bare first-name match from firing when the
+    # message is clearly about a DIFFERENT full person who happens to share
+    # that first name with a previously-suggested contact.
+    full_names_in_text = _PROPER_NAME_RE.findall(text)
+
     for i, m in enumerate(matches):
         name = (m.get("name") or "").strip()
         if not name:
             continue
         first = name.split()[0].lower()
+        # Seen live: "Did you know Aaron Lopez works at JP Morgan now?" was
+        # falsely treated as a pick of previously-suggested "Aaron Adams",
+        # purely because both share the first name "Aaron" — the message was
+        # actually fresh news about a totally different person. If the text
+        # names someone in full whose first name matches but surname
+        # doesn't, this is that different-person case — skip the bare
+        # first-name match rather than conflate the two.
+        conflicting_full_name = any(
+            fn.split()[0].lower() == first and fn.strip().lower() != name.lower()
+            for fn in full_names_in_text
+        )
+        if conflicting_full_name:
+            continue
         # Allow an optional possessive ("John's" / "Johns details").
         if len(first) >= 3 and re.search(rf"\b{re.escape(first)}(?:['’]?s)?\b", low):
             _add(i)

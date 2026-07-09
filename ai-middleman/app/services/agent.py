@@ -330,9 +330,14 @@ Respond ONLY with this exact JSON structure:
 Sort matches by confidence score descending. Maximum 3 matches. Only include contacts scoring above 0.3."""
 
     def _fallback_response(self) -> Dict[str, Any]:
+        # Fires when every LLM provider fails/rate-limits on the same request.
+        # This text goes straight into a drafted WhatsApp reply Alex might tap
+        # Send on without reading closely — it must never read like a system
+        # error, or a transient provider blip becomes a visibly broken demo.
+        # Phrased as something Alex would plausibly say himself.
         return {
             "analysis": "LLM temporarily unavailable",
             "matches": [],
             "match_quality": "none",
-            "clarification_question": "I'm experiencing temporary difficulties. Please try again in a moment."
+            "clarification_question": "Let me have a look and get back to you shortly!"
         }
