@@ -2,7 +2,7 @@
 
 > Automating business connections through intelligent AI matching.
 
-A WhatsApp bot that reads natural-language contact requests, matches them against a 50,000-contact database using a two-stage AI pipeline, drafts a reply in the account owner's own voice — and then waits for his real approval (Send / Edit / Skip) before anything reaches the requester. Supports South Africa's 11 official languages, with a React dashboard for live-pipeline visualization and analytics.
+A WhatsApp bot that reads natural-language contact requests, matches them against a 50,000-contact database using a two-stage AI pipeline, drafts a reply in the account owner's own voice — and then waits for his real approval (Send / Edit / Skip) before anything reaches the requester. Replies in English and Afrikaans (see [Language scope](#language-scope)), with a React dashboard for live-pipeline visualization and analytics.
 
 ---
 
@@ -101,7 +101,10 @@ ai-middleman/
 │       ├── groq_media.py           # Voice transcription (Whisper) + image description
 │       ├── llm_provider.py         # Picks Groq vs Featherless per call
 │       ├── llm_json.py             # Tolerant JSON parsing for LLM replies
-│       └── sa_languages.py         # South Africa's 11 official languages
+│       ├── sa_languages.py         # Supported reply languages (English, Afrikaans)
+│       ├── contact_lookup.py       # Fuzzy name resolution, shared by updates + direct lookup
+│       ├── update_extractor.py     # "Katherine moved to Blackstone" → contact update + audit row
+│       └── pipeline_events.py      # In-memory stage feed powering the dashboard visualizer
 ├── frontend/                       # React + TanStack dashboard (the demo surface)
 ├── migrations/                     # Numbered SQL migrations, applied in order at startup
 ├── tests/
@@ -223,7 +226,19 @@ Copy the printed URL and configure it in your Meta Developer dashboard as the Ca
 ## Matching Pipeline — How It Works
 
 ### Intent + language classification
-One LLM call decides whether the message is a contact request, detects which of South Africa's 11 official languages it's written in (or a natural code-switched mix), and produces an English rendering for search — all in a single round trip, so English messages (the common case) pay no extra latency.
+One LLM call decides whether the message is a contact request, detects whether it's written in English or Afrikaans (or a natural code-switched mix), and produces an English rendering for search — all in a single round trip, so English messages (the common case) pay no extra latency.
+
+### Language scope
+Supported reply languages are **English and Afrikaans**, deliberately — not all 11 of South Africa's official languages.
+
+The pipeline originally attempted all 11. Live testing surfaced two real failure modes, both on the Nguni family (isiZulu, isiXhosa, siSwati, isiNdebele):
+
+1. **Garbled output.** Even when isiZulu was correctly identified, the 8B model's isiZulu was frequently not grammatical isiZulu — consistent with those languages being far less represented in training data than English or Afrikaans.
+2. **Mid-conversation language flips.** Short, ambiguous messages ("anyone else") were sometimes misclassified into one of those languages, producing a nonsensical reply in a chat that had been English throughout.
+
+Both were fixed by narrowing scope rather than patching around it — two languages that work reliably beat eleven where nine are a coin flip. Two guards remain in code: a Nguni-marker regex (`_looks_nguni_not_afrikaans` in `intent_classifier.py`) that overrides the model when it force-fits real isiZulu into the "Afrikaans" bucket, and a sticky-language rule so short follow-ups inherit the prior message's language instead of re-guessing. The language guard scores 8/8 on the eval set.
+
+See `app/services/sa_languages.py` for the full rationale.
 
 ### Stage 1: Keyword Filter
 Extracts 3+ character tokens from the (English-rendered) query and searches across 9 database fields using PostgreSQL regex, capped at 25 candidates. Location-aware: queries containing city or country names boost geographically matching contacts to the top of the candidate list before passing to the LLM.
@@ -291,8 +306,8 @@ python scripts/run_eval.py            # Labeled intent/matching accuracy (needs 
 - [x] Phase 2: Two-stage matching engine (keyword filter + LLM agent)
 - [x] Phase 3: WhatsApp Business API integration, end-to-end message flow
 - [x] Phase 4: Human-in-the-loop approval (Send/Edit/Skip), React dashboard, labeled evaluation harness, CI
-- [x] Phase 5: Multilingual support for South Africa's 11 official languages (architecture complete; only 2 of 11 languages tested end-to-end so far — see `/reports`)
-- [ ] Phase 6: Larger, native-speaker-reviewed evaluation set covering all 11 languages; paid/self-hosted LLM tier for production scale
+- [x] Phase 5: Multilingual support, scoped to English + Afrikaans after live testing found the 8B model unreliable on the Nguni languages — see [Language scope](#language-scope) and `/reports`
+- [ ] Phase 6: Raise matching relevance past 66.7% and intent precision past 66.7%; native-speaker-reviewed evaluation set as a prerequisite for widening the language set; paid/self-hosted LLM tier for production scale
 
 ---
 

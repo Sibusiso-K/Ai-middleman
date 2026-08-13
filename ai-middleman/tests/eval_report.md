@@ -1,11 +1,11 @@
 # AI Middleman — Evaluation Report
 
 ## Intent classification
-- Accuracy: 100.0%
-- Precision: 100.0%
+- Accuracy: 75.0%
+- Precision: 66.7%
 - Recall: 100.0%
-- F1: 100.0%
-- Confusion: TP=10 FP=0 TN=10 FN=0 (errors=0)
+- F1: 80.0%
+- Confusion: TP=10 FP=5 TN=5 FN=0 (errors=0)
 
 | Expected | Actual | Result | Message |
 |---|---|---|---|
@@ -20,35 +20,36 @@
 | True | True | PASS | Hiring a CFO soon, anyone spring to mind? |
 | True | True | PASS | Could you put me in touch with someone at Kirkland & Ellis? |
 | False | False | PASS | Yo what's good |
-| False | False | PASS | Movie night this weekend still on? |
-| False | False | PASS | Appreciate you covering for me at the meeting |
-| False | False | PASS | Ring me later, I'm swamped rn |
+| False | True | FAIL | Movie night this weekend still on? |
+| False | True | FAIL | Appreciate you covering for me at the meeting |
+| False | True | FAIL | Ring me later, I'm swamped rn |
 | False | False | PASS | Crazy how the markets are behaving lately huh |
-| False | False | PASS | Confirmed |
+| False | True | FAIL | Confirmed |
 | False | False | PASS | haha no way, that's wild |
-| False | False | PASS | Congrats on the promotion!! |
+| False | True | FAIL | Congrats on the promotion!! |
 | False | False | PASS | Watched the match last night, wild finish |
 | False | False | PASS | Running behind, be there in 10 |
 
 ## Matching relevance
-- Relevance rate: 7/14 (50.0%)
+- Relevance rate: 10/15 (66.7%)
 
 | Query | Top match | Result | Notes |
 |---|---|---|---|
-| I need a leveraged finance MD in London for a mid-market buyout | Dr. Jennifer Shelton DVM (Sterling Bridge Finance, London, UK) conf=0.95 | PASS |  |
-| Find me a direct lending specialist in Dubai | Stacy Frazier (Northbridge Ventures, Dubai, UAE) conf=1.0 | PASS |  |
-| Connect me with an M&A lawyer at a top firm in London | None | None | ERROR:  |
-| Find a healthcare venture capital principal in Boston | None | None | ERROR:  |
-| Need an energy infrastructure investor in Amsterdam | Brooke Smith (Copenhagen Infrastructure Partners, Amsterdam, Netherlands) conf=0.95 | PASS |  |
-| Looking for an investment banking VP in Singapore | None | None | ERROR:  |
-| Connect me with a private credit principal in Mumbai | Carrie Gillespie (Blackstone Credit, Mumbai, India) conf=0.7 | PASS |  |
-| Find a corporate lawyer at Kirkland & Ellis | None | None | ERROR:  |
-| Real estate investment chairman in Dubai | None | None | ERROR:  |
-| Tech CTO in Zurich | Daniel Nichols (Pulse Health Tech, Zurich, Switzerland) conf=0.9 | PASS |  |
-| Recruiting partner in Tel Aviv | None | None | ERROR:  |
-| Someone in Johannesburg who does corporate law | None | None | ERROR:  |
-| Any private equity partners in Dubai I should meet? | Colton Smith (Meridian Growth Partners, Dubai, UAE) conf=0.9 | PASS |  |
-| Do you know any energy investors in Amsterdam? | David Tucker (NextEra Energy, Amsterdam, Netherlands) conf=0.85 | PASS |  |
+| I need a leveraged finance MD in London for a mid-market buyout | None | None | ERROR:  |
+| Find me a direct lending specialist in Dubai | Steven Cook (Meridian Growth Partners, Dubai, UAE) conf=0.9 | PASS |  |
+| Connect me with an M&A lawyer at a top firm in London | Bonnie Mercado (Linklaters, London, UK) conf=0.9 | PASS |  |
+| Find a healthcare venture capital principal in Boston | Samuel Contreras (Catalio Capital, Boston, USA) conf=0.9 | PASS |  |
+| Need an energy infrastructure investor in Amsterdam | None | None | ERROR:  |
+| Looking for an investment banking VP in Singapore | Donald Decker (JP Morgan, Singapore) conf=0.5 | PASS |  |
+| Connect me with a private credit principal in Mumbai | Andrea Powell (KKR Credit, Mumbai, India) conf=0.85 | PASS |  |
+| Find a corporate lawyer at Kirkland & Ellis | Lauren Boyd (Kirkland & Ellis, Frankfurt, Germany) conf=0.9 | PASS |  |
+| Real estate investment chairman in Dubai | Mary Whitaker (LaSalle Investment, Dubai, UAE) conf=0.9 | PASS |  |
+| Tech CTO in Zurich | None | None | ERROR:  |
+| Recruiting partner in Tel Aviv | Kayla Jordan (Odgers Berndtson, Tel Aviv, Israel) conf=0.9 | PASS |  |
+| Someone in Johannesburg who does corporate law | Jacqueline Lopez (Latham & Watkins, Mumbai, India) conf=0.5 | FAIL | expected a low-confidence/no match (this location isn't in the dataset) but got a confident hit — possible hallucination |
+| Any private equity partners in Dubai I should meet? | None | None | ERROR:  |
+| Do you know any energy investors in Amsterdam? | Steven Gross (Vitol, Amsterdam, Netherlands) conf=0.85 | PASS |  |
+| Do you know anyone from JPMorgan in a senior position? | Michael Sanchez (JP Morgan, Los Angeles, USA) conf=0.9 | PASS |  |
 
 ## Follow-up selection
 - Selection accuracy: 20/20 (100.0%)

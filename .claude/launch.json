@@ -13,6 +13,13 @@
       "runtimeArgs": ["/c", "ai-middleman\\frontend\\run-dev.cmd"],
       "port": 5174,
       "autoPort": true
+    },
+    {
+      "name": "sonar-web",
+      "runtimeExecutable": "cmd.exe",
+      "runtimeArgs": ["/c", "cd /d C:\\Users\\lovilocal.adm\\sonar_push\\web && npm run dev"],
+      "port": 3000
     }
-  ]
+  ],
+  "autoVerify": false
 }
