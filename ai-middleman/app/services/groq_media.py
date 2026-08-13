@@ -6,9 +6,9 @@ dashboard/web upload) get converted to plain text here, then fed into the
 exact same intent/matching/draft pipeline as a normal typed message — so a
 voice note asking "know a lawyer in Durban?" triggers a suggestion exactly
 like typing it would. That shared pipeline (IntentClassifier.classify) is
-what detects language and replies in kind, so voice/image messages in any of
-South Africa's 11 official languages get the same multilingual handling as a
-typed message, with no extra code needed here.
+what detects language and replies in kind, so voice/image messages get the
+same language handling as a typed message — English and Afrikaans, per
+sa_languages.py — with no extra code needed here.
 
 Requires GROQ_API_KEY. Raises MediaTranscriptionError if it's missing or the
 API call fails — callers should surface that clearly rather than silently
