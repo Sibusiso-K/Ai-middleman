@@ -124,9 +124,8 @@ The short version:
 cd ai-middleman
 python -m venv venv && venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env          # fill in Meta + Groq credentials
-docker compose up -d          # PostgreSQL
-python generate_contacts.py && python data/import_contacts.py
+cp .env.example .env          # fill in required provider credentials
+python scripts/bootstrap_local_db.py  # PostgreSQL, migrations, checked-in CSV
 uvicorn app.main:app --reload
 ```
 
