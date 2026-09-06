@@ -27,7 +27,7 @@ from pathlib import Path
 
 from app.log_safe import slog
 from app.services.contact_lookup import resolve_contact_by_name
-from app.services.llm_provider import get_chat_configs
+from app.services.llm_provider import get_chat_configs, chat_payload, completion_text
 from app.services.llm_json import extract_json
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
@@ -112,12 +112,7 @@ Reply with ONLY this JSON, no markdown, no explanation:
             "Authorization": f"Bearer {config['api_key']}",
             "Content-Type": "application/json",
         }
-        payload = {
-            "model": config["model"],
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.1,
-            "max_tokens": 120,
-        }
+        payload = chat_payload(config, [{"role": "user", "content": prompt}], temperature=0.1, max_tokens=120, json_object=True)
         timeout = 10.0 if config["name"] == "groq" else 30.0
         for attempt in range(1, 4):
             try:
@@ -126,7 +121,7 @@ Reply with ONLY this JSON, no markdown, no explanation:
                         config["api_url"], headers=headers, json=payload, timeout=timeout
                     )
                 if response.status_code == 200:
-                    content = response.json()["choices"][0]["message"]["content"]
+                    content = completion_text(response)
                     data = extract_json(content)
                     contact_name = data.get("contact_name") or None
                     if isinstance(contact_name, str) and not contact_name.strip():
