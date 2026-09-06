@@ -15,6 +15,7 @@ Usage:
 """
 
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -26,7 +27,6 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).parent.parent
 load_dotenv(ROOT / ".env")
 
-DB_CONTAINER = "ai-middleman-db-1"
 API_PORT = int(os.getenv("PORT", "8000"))
 API_HEALTH_URL = f"http://localhost:{API_PORT}/health"
 NGROK_DOMAIN = os.getenv("NGROK_DOMAIN", "plating-marmalade-outthink.ngrok-free.dev")
@@ -79,23 +79,46 @@ def _wait_healthy(label: str, url: str, headers: dict | None = None) -> bool:
 
 def start_database() -> bool:
     print("1. Database (Docker Postgres)")
-    inspect = subprocess.run(
-        ["docker", "inspect", "-f", "{{.State.Running}}", DB_CONTAINER],
-        capture_output=True, text=True,
-    )
-    if inspect.returncode == 0 and inspect.stdout.strip() == "true":
-        _ok(f"{DB_CONTAINER} already running")
-        return True
-
-    print(f"  Starting {DB_CONTAINER} ...")
-    started = subprocess.run(["docker", "start", DB_CONTAINER], capture_output=True, text=True)
-    if started.returncode != 0:
-        print(f"  [FAIL] Could not start {DB_CONTAINER}: {started.stderr.strip()}")
-        print(f"  If the container has never been created, run: docker compose up -d  (from {ROOT})")
+    if shutil.which("docker") is None:
+        print("  [FAIL] Docker CLI was not found on PATH.")
+        print("  Install/start Docker Desktop, then open a new terminal and run this command again.")
         return False
-    time.sleep(2)  # Postgres needs a moment after container start before accepting connections
-    _ok(f"{DB_CONTAINER} started")
-    return True
+
+    # Compose owns the generated container name.  Do not use `docker start`
+    # against a name such as ai-middleman-db-1: it may not exist yet and it
+    # changes when Compose's project name changes.  `up` is idempotent and
+    # creates the service and its local volume on a new Docker installation.
+    print("  Creating or starting the Compose db service ...")
+    started = subprocess.run(
+        ["docker", "compose", "up", "-d", "db"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if started.returncode != 0:
+        detail = (started.stderr or started.stdout).strip()
+        print(f"  [FAIL] Docker Compose could not start the database: {detail}")
+        return False
+
+    print("  Waiting for Postgres ...", end="", flush=True)
+    deadline = time.time() + POLL_TIMEOUT_SECONDS
+    while time.time() < deadline:
+        ready = subprocess.run(
+            ["docker", "compose", "exec", "-T", "db", "pg_isready", "-U", "postgres", "-d", "aimiddleman"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        if ready.returncode == 0:
+            print(" up")
+            _ok("Compose db service is ready")
+            return True
+        print(".", end="", flush=True)
+        time.sleep(POLL_INTERVAL_SECONDS)
+
+    print(" TIMED OUT")
+    print("  [FAIL] Postgres did not become ready within 30 seconds.")
+    return False
 
 
 def start_api() -> bool:

@@ -6,9 +6,16 @@ services:
       - POSTGRES_DB=aimiddleman
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=${DB_PASSWORD}
+    # The database is for this local app only.  Keeping it off the LAN avoids
+    # accidentally exposing contacts when Docker runs on a shared network.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d aimiddleman"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
 volumes:
   pgdata: {}

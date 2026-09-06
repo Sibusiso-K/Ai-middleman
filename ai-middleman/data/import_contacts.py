@@ -25,16 +25,19 @@ async def import_contacts():
     print(f"Reading {CSV_PATH}...")
     with open(CSV_PATH, encoding="utf-8") as f:
         reader = csv.DictReader(f)
-        rows = list(reader)
+        required = {"contact_id", "full_name", "relationship_strength", "is_vip"}
+        missing = required - set(reader.fieldnames or [])
+        if missing:
+            raise ValueError(f"CSV is missing required columns: {', '.join(sorted(missing))}")
 
-    print(f"Found {len(rows)} rows. Importing...")
+        print("Importing (safe to re-run; existing contact IDs are skipped)...")
+        inserted = 0
+        skipped = 0
+        errors = 0
 
-    inserted = 0
-    skipped = 0
-
-    for i, row in enumerate(rows):
-        try:
-            await conn.execute("""
+        for i, row in enumerate(reader, start=1):
+            try:
+                result = await conn.execute("""
                 INSERT INTO contacts (
                     contact_id, full_name, phone, email, company, title,
                     sector, specialty, location, seniority, expertise_tags,
@@ -45,7 +48,7 @@ async def import_contacts():
                 ) VALUES (
                     $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23
                 ) ON CONFLICT (contact_id) DO NOTHING
-            """,
+                """,
                 row["contact_id"],
                 row["full_name"],
                 row["phone"] or None,
@@ -69,18 +72,21 @@ async def import_contacts():
                 row["do_not_intro_to"] or None,
                 date.fromisoformat(row["last_verified"]) if row["last_verified"] else None,
                 row["comment"] or None,
-            )
-            inserted += 1
-        except Exception as e:
-            skipped += 1
-            if skipped <= 5:
-                print(f"  Row {i} error: {e}")
+                )
+                if result.endswith(" 1"):
+                    inserted += 1
+                else:
+                    skipped += 1
+            except Exception as e:
+                errors += 1
+                if errors <= 5:
+                    print(f"  Row {i} error: {e}")
 
-        if (i + 1) % 1000 == 0:
-            print(f"  Progress: {i + 1}/{len(rows)}")
+            if i % 1000 == 0:
+                print(f"  Progress: {i} rows; inserted={inserted}, already present={skipped}, errors={errors}")
 
     await conn.close()
-    print(f"\nDone! Inserted: {inserted}, Skipped: {skipped}")
+    print(f"\nDone! Inserted: {inserted}, Already present: {skipped}, Errors: {errors}")
 
 if __name__ == "__main__":
     asyncio.run(import_contacts())
