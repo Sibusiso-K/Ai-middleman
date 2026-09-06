@@ -83,10 +83,22 @@ Existing eval scores are historical and must be rerun on the replacements.
 
 ## Still important before public production use
 
-- Dashboard contact CRUD, pipeline events and friend-simulator routes have no
-  application authentication. Keep the demo behind a trusted/private access layer;
-  CORS is not authentication. Add an authenticated owner session before exposing
-  these endpoints publicly. Webhook HMAC fixes only the webhook boundary.
+- **Closed 6 September:** dashboard contact CRUD, pipeline events, friend simulator
+  and /match now require a short-lived, signed, HTTP-only owner cookie. The React
+  console presents a password form; it never receives a durable API secret.
+  Passwords are stored as scrypt hashes, login guesses are rate-limited, cookies
+  are Secure in production and SameSite=Strict, and logout clears the cookie.
+  CORS permits explicit origins only with credentials. Production startup rejects
+  placeholder/missing auth settings, wildcard/non-HTTPS origins, invalid request
+  limits, and missing WhatsApp signing settings. Generate settings locally with
+  python scripts/create_owner_credentials.py; do not put them in VITE_*.
+  This is owner authentication, not multi-user RBAC or SSO.
+- The API adds no-store, anti-framing, MIME-sniffing, referrer and permissions
+  headers; enforces a configurable request size (10 MiB default); rejects oversized
+  chat text; validates declared image signatures; and limits supported media MIME
+  types. Docker now binds PostgreSQL to localhost rather than every interface.
+  A reverse proxy/firewall, HTTPS certificate handling, backups and external rate
+  limiting remain deployment responsibilities.
 - The ranking code retains weak candidates at 0.3 while the friend route selects
   strong candidates at 0.7; older prose says 0.5. Thresholds were not silently
   retuned during a model migration. Reconcile the documented policy with measured

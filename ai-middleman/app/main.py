@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 # Load .env BEFORE any other imports that might need env vars
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from .database import init_db, get_db
@@ -29,12 +29,12 @@ from .routes.whatsapp_webhook import router as whatsapp_router
 from .routes.friend import router as friend_router
 from .routes.pipeline import router as pipeline_router
 from .routes.dashboard_api import router as dashboard_api_router
+from .routes.auth import router as auth_router
+from .security import require_admin, security_settings, validate_production_configuration
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup token check — log only the length, never any fragment of the token.
-    token = os.getenv("WHATSAPP_ACCESS_TOKEN", "NOT_FOUND")
-    print(f"[STARTUP] WHATSAPP_ACCESS_TOKEN length: {len(token)}")
+    validate_production_configuration()
 
     await init_db()
     app.state.db_pool = await get_db()
@@ -43,17 +43,32 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="AI Middleman API", lifespan=lifespan)
 
-# Allow the Vercel-hosted friend chat frontend (or any browser) to call
-# /friend/* cross-origin. Demo-scoped: wide open by default, restrict via
-# CORS_ALLOWED_ORIGINS (comma-separated) if this ever needs to be tighter.
-_cors_origins = os.getenv("CORS_ALLOWED_ORIGINS", "*")
+_security = security_settings()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if _cors_origins == "*" else _cors_origins.split(","),
+    allow_origins=list(_security.frontend_origins),
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
+    allow_credentials=True,
 )
 
+
+@app.middleware("http")
+async def security_headers_and_request_limit(request: Request, call_next):
+    length = request.headers.get("content-length")
+    if length and length.isdigit() and int(length) > _security.max_request_bytes:
+        return Response(status_code=413, content="Request too large")
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    response.headers.setdefault("Cache-Control", "no-store")
+    if _security.secure_cookies:
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return response
+
+app.include_router(auth_router)
 app.include_router(whatsapp_router)
 app.include_router(friend_router)
 app.include_router(pipeline_router)
@@ -67,12 +82,14 @@ async def root():
 async def health():
     return {"status": "ok"}
 
-@app.post("/match")
+@app.post("/match", dependencies=[Depends(require_admin)])
 async def test_match(request: Request):
     body = await request.json()
     query = body.get("query", "")
     if not query:
-        return {"error": "query is required"}
+        raise HTTPException(status_code=422, detail="query is required")
+    if not isinstance(query, str) or len(query) > 4_000:
+        raise HTTPException(status_code=422, detail="query must be text up to 4,000 characters")
     engine = MatchingEngine(app.state.db_pool)
     result = await engine.match(query)
     return result

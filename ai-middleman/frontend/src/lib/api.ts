@@ -4,25 +4,34 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 // otherwise replaces every API response with an HTML page when the request
 // carries a normal browser User-Agent (harmless no-op against non-ngrok hosts).
 const NGROK_BYPASS_HEADERS = { "ngrok-skip-browser-warning": "true" };
+const PRIVATE_FETCH = { credentials: "include" as const };
 
 async function request<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, { headers: NGROK_BYPASS_HEADERS });
-  if (!res.ok) throw new Error(`${path} -> ${res.status}`);
-  return res.json() as Promise<T>;
-}
-
-async function send<T>(method: "POST" | "PUT" | "DELETE", path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
-    method,
-    headers: { "Content-Type": "application/json", ...NGROK_BYPASS_HEADERS },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    headers: NGROK_BYPASS_HEADERS,
+    ...PRIVATE_FETCH,
   });
   if (!res.ok) throw new Error(`${path} -> ${res.status}`);
   return res.json() as Promise<T>;
 }
-const post = <T,>(path: string, body: unknown) => send<T>("POST", path, body);
-const put = <T,>(path: string, body: unknown) => send<T>("PUT", path, body);
-const del = <T,>(path: string) => send<T>("DELETE", path);
+
+async function send<T>(
+  method: "POST" | "PUT" | "DELETE",
+  path: string,
+  body?: unknown,
+): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method,
+    headers: { "Content-Type": "application/json", ...NGROK_BYPASS_HEADERS },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+    ...PRIVATE_FETCH,
+  });
+  if (!res.ok) throw new Error(`${path} -> ${res.status}`);
+  return res.json() as Promise<T>;
+}
+const post = <T>(path: string, body: unknown) => send<T>("POST", path, body);
+const put = <T>(path: string, body: unknown) => send<T>("PUT", path, body);
+const del = <T>(path: string) => send<T>("DELETE", path);
 
 export type SectorStat = { name: string; value: number };
 export type LocationStat = { name: string; value: number };
@@ -37,10 +46,25 @@ export type ConversationSummary = {
 };
 export type FunnelSlice = { name: string; value: number };
 export type RequestedStat = { name: string; value: number };
-export type RequestedContact = { name: string; title: string | null; company: string | null; value: number };
+export type RequestedContact = {
+  name: string;
+  title: string | null;
+  company: string | null;
+  value: number;
+};
 export type ChannelSlice = { name: string; value: number };
-export type CalibrationBucket = { bucket: string; resolved: number; sent: number; send_rate: number };
-export type UnderusedVip = { name: string; title: string | null; company: string | null; relationship_strength: number | null };
+export type CalibrationBucket = {
+  bucket: string;
+  resolved: number;
+  sent: number;
+  send_rate: number;
+};
+export type UnderusedVip = {
+  name: string;
+  title: string | null;
+  company: string | null;
+  relationship_strength: number | null;
+};
 export type UnderusedVips = { total: number; contacts: UnderusedVip[] };
 
 export type ContactRow = {
@@ -88,7 +112,12 @@ export type ContactWrite = Omit<ContactFull, "id">;
 
 export type ContactDetail = {
   contact: ContactFull;
-  recent_matches: { confidence: number; reasoning: string; created_at: string; message_text: string }[];
+  recent_matches: {
+    confidence: number;
+    reasoning: string;
+    created_at: string;
+    message_text: string;
+  }[];
 };
 
 export type FilterOptions = { sectors: string[]; locations: string[]; seniorities: string[] };
@@ -102,7 +131,13 @@ export type ActivityEvent = {
 
 export type MatchResult = {
   analysis: string;
-  matches: { contact_id: number; name: string; role: string; confidence: number; reasoning: string }[];
+  matches: {
+    contact_id: number;
+    name: string;
+    role: string;
+    confidence: number;
+    reasoning: string;
+  }[];
   match_quality: "good" | "weak" | "none";
   clarification_question?: string;
 };
@@ -110,7 +145,7 @@ export type MatchResult = {
 export type ThreadEvent = {
   id: number;
   event_type: string;
-  payload: Record<string, any>;
+  payload: Record<string, unknown>;
   created_at: string;
 };
 
@@ -123,8 +158,25 @@ export type PipelineEvent = {
 };
 
 export const api = {
+  session: () => request<{ authenticated: true }>("/auth/session"),
+  login: async (password: string) => {
+    const res = await fetch(API_BASE + "/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...NGROK_BYPASS_HEADERS },
+      body: JSON.stringify({ password }),
+      ...PRIVATE_FETCH,
+    });
+    if (!res.ok)
+      throw new Error(
+        res.status === 429
+          ? "Too many attempts. Please wait and try again."
+          : "Incorrect password.",
+      );
+  },
+  logout: () => send<void>("POST", "/auth/logout"),
   analyticsSectors: () => request<SectorStat[]>("/api/analytics/sectors"),
-  analyticsLocations: (limit = 10) => request<LocationStat[]>(`/api/analytics/locations?limit=${limit}`),
+  analyticsLocations: (limit = 10) =>
+    request<LocationStat[]>(`/api/analytics/locations?limit=${limit}`),
   conversationSummary: () => request<ConversationSummary>("/api/analytics/conversation-summary"),
   approvalFunnel: () => request<FunnelSlice[]>("/api/analytics/approval-funnel"),
   requestedSectors: () => request<RequestedStat[]>("/api/analytics/requested-sectors"),
@@ -132,13 +184,19 @@ export const api = {
   topRequestedContacts: () => request<RequestedContact[]>("/api/analytics/top-requested-contacts"),
   requestedLocations: () => request<RequestedStat[]>("/api/analytics/requested-locations"),
   channelMix: () => request<ChannelSlice[]>("/api/analytics/channel-mix"),
-  confidenceCalibration: () => request<CalibrationBucket[]>("/api/analytics/confidence-calibration"),
+  confidenceCalibration: () =>
+    request<CalibrationBucket[]>("/api/analytics/confidence-calibration"),
   underusedVips: () => request<UnderusedVips>("/api/analytics/underused-vips"),
   filterOptions: () => request<FilterOptions>("/api/filters/options"),
   activity: (limit = 10) => request<ActivityEvent[]>(`/api/activity?limit=${limit}`),
   contacts: (params: {
-    search?: string; sector?: string; location?: string; seniority?: string;
-    vip?: boolean; page?: number; pageSize?: number;
+    search?: string;
+    sector?: string;
+    location?: string;
+    seniority?: string;
+    vip?: boolean;
+    page?: number;
+    pageSize?: number;
   }) => {
     const q = new URLSearchParams();
     if (params.search) q.set("search", params.search);
@@ -156,14 +214,24 @@ export const api = {
   deleteContact: (id: number) => del<{ deleted: number }>(`/api/contacts/${id}`),
   match: (query: string) => post<MatchResult>("/match", { query }),
   friendThread: () => request<{ thread_id: number; events: ThreadEvent[] }>("/friend/thread"),
-  friendSend: (text: string) => post<{ status: string } | { error: string }>("/friend/send", { text }),
-  friendSendMedia: async (file: File | Blob, filename: string): Promise<{ status: string } | { error: string }> => {
+  friendSend: (text: string) =>
+    post<{ status: string } | { error: string }>("/friend/send", { text }),
+  friendSendMedia: async (
+    file: File | Blob,
+    filename: string,
+  ): Promise<{ status: string } | { error: string }> => {
     const form = new FormData();
     form.append("file", file, filename);
-    const res = await fetch(`${API_BASE}/friend/send-media`, { method: "POST", body: form });
+    const res = await fetch(API_BASE + "/friend/send-media", {
+      method: "POST",
+      body: form,
+      headers: NGROK_BYPASS_HEADERS,
+      ...PRIVATE_FETCH,
+    });
     if (!res.ok) throw new Error(`/friend/send-media -> ${res.status}`);
     return res.json();
   },
-  pipelineEvents: (since = 0) => request<{ events: PipelineEvent[]; since: number }>(`/pipeline/events?since=${since}`),
+  pipelineEvents: (since = 0) =>
+    request<{ events: PipelineEvent[]; since: number }>(`/pipeline/events?since=${since}`),
   health: () => request<{ status: string }>("/health"),
 };

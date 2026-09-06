@@ -7,6 +7,12 @@ migrate with warnings. OpenRouter now uses its own endpoint/key. See the
 the remaining production-security limits. Historical eval scores below have
 **not** been re-measured on these replacements.
 
+The private console now requires an owner login. Before production deployment,
+generate the server-side password hash/session secret with
+python scripts/create_owner_credentials.py, configure explicit HTTPS CORS
+origins, and keep all secrets out of VITE_* variables. The API will refuse an
+unsafe production configuration at startup.
+
 **A WhatsApp bot that answers "hey, do you know anyone who…" — and never sends a word without its owner's approval.**
 
 Alex has 50,000 professional contacts and a WhatsApp inbox full of people asking to be

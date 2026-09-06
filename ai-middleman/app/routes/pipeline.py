@@ -5,10 +5,11 @@ Mirrors app/services/pipeline_events.py so the frontend can render each
 pipeline stage (intent check -> matching -> draft -> Alex's decision) as a
 diagram instead of the uvicorn terminal, for demo purposes.
 """
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from app.services.pipeline_events import events_since
+from app.security import require_admin
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_admin)])
 
 
 @router.get("/pipeline/events")
