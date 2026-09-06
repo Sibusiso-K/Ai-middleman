@@ -82,8 +82,10 @@ async def receive_webhook(request: Request):
     payload = await request.body()
     signature = request.headers.get("X-Hub-Signature-256", "")
 
-    if APP_SECRET and not verify_signature(payload, signature):
-        print("[WARNING] Invalid webhook signature — allowing through for debugging")
+    if not APP_SECRET or APP_SECRET.startswith("your_"):
+        raise HTTPException(status_code=503, detail="Webhook signing secret is not configured")
+    if not verify_signature(payload, signature):
+        raise HTTPException(status_code=403, detail="Invalid webhook signature")
 
     # Parse defensively: a malformed body must not 500 (that makes Meta
     # retry-storm). Decode leniently — real Meta payloads are valid UTF-8.

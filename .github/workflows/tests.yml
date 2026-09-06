@@ -47,7 +47,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run unit tests
-        run: python -m pytest tests/test_matching.py -v
+        run: python -m pytest tests/ -v
 
       - name: Run migration schema check
         run: python scripts/test_migrations.py

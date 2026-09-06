@@ -1,5 +1,12 @@
 # AI Middleman
 
+**Model migration — 6 September 2026:** retired Groq defaults have been replaced
+with GPT-OSS 20B (text) and Qwen 3.6 27B (images). Existing retired `.env` IDs
+migrate with warnings. OpenRouter now uses its own endpoint/key. See the
+[migration and verification report](ai-middleman/MODEL-MIGRATION.md), including
+the remaining production-security limits. Historical eval scores below have
+**not** been re-measured on these replacements.
+
 **A WhatsApp bot that answers "hey, do you know anyone who…" — and never sends a word without its owner's approval.**
 
 Alex has 50,000 professional contacts and a WhatsApp inbox full of people asking to be
@@ -42,7 +49,7 @@ So the work is split:
 | Stage | Does what | Cost | Time |
 |---|---|---|---|
 | **1 — Keyword filter** | PostgreSQL regex across 9 contact fields, location-aware, caps at 25 candidates | free | <100ms |
-| **2 — LLM ranking** | Llama 3.1 8B scores those 25 on location, role, seniority, relationship strength | free tier | 2–3s |
+| **2 — LLM ranking** | GPT-OSS 20B scores the shortlist on location, role, seniority, relationship strength | account-dependent | re-benchmark required |
 | **3 — Draft** | A separate, focused call writes Alex's reply in his voice and the sender's language | free tier | 1–2s |
 
 Ranking and drafting are two calls on purpose. Merged into one prompt, the 8B model got
@@ -61,7 +68,7 @@ overloaded by 25 candidates and periodically returned empty completions. Splitti
   through the identical pipeline. A voice note asking for a lawyer behaves like typing it.
 - **Conversational contact updates** — *"Katherine moved to Blackstone"* updates the record and
   writes a before/after row to `contact_change_log` with who said it and the raw message.
-- **Three-provider LLM fallback** — Groq → Featherless → HuggingFace, all OpenAI-compatible, so a
+- **Configured-provider LLM fallback** — Groq → Featherless → OpenRouter → HuggingFace (HF excluded from ranking), all OpenAI-compatible, so a
   rate limit mid-demo degrades instead of dying.
 - **React dashboard** — live pipeline visualization, contacts browser, analytics, and a "Sam"
   simulator so the friend side can be demoed without a second physical phone.
@@ -144,7 +151,7 @@ reports/               LaTeX technical report, analytics, presentation prep, dem
 
 ## Stack
 
-FastAPI · asyncpg · PostgreSQL 15 · Groq (Llama 3.1 8B) · Featherless · Meta WhatsApp Business
+FastAPI · asyncpg · PostgreSQL 15 · Groq (GPT-OSS 20B) · Featherless · Meta WhatsApp Business
 Cloud API · React 19 · TanStack Start · Tailwind 4 · Docker
 
 **No ORM** — asyncpg directly, for async webhook throughput without ORM overhead.
@@ -152,7 +159,8 @@ Cloud API · React 19 · TanStack Start · Tailwind 4 · Docker
 **No vector search** — at 50,000 contacts the keyword filter is fast enough, and embeddings would
 add storage, memory, and re-indexing cost for no measured gain.
 
-Running cost: **$1–4/month**, mostly the domain. Free-tier LLM rate limits are the real ceiling.
+The earlier **$1–4/month** estimate is historical, not a quote for the migrated
+models. Verify current provider credits, pricing and usage before deployment.
 
 ---
 
