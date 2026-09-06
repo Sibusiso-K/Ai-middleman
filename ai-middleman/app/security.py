@@ -35,6 +35,18 @@ def is_production() -> bool:
     return setting("APP_ENV", "production").lower() == "production"
 
 
+def local_demo_bypass_enabled() -> bool:
+    """Allow an explicit localhost-only demo without owner-login setup.
+
+    This can never activate in production.  The launcher also refuses to
+    start ngrok while it is enabled, preventing accidental public exposure.
+    """
+    return (
+        not is_production()
+        and setting("LOCAL_DEMO_BYPASS_AUTH").lower() in {"1", "true", "yes"}
+    )
+
+
 @dataclass(frozen=True)
 class SecuritySettings:
     password_hash: str
@@ -66,9 +78,13 @@ def validate_production_configuration() -> None:
     """Fail closed before the app can expose contact data or mutate records."""
     settings = security_settings()
     errors = []
-    if is_example(settings.password_hash) or not settings.password_hash.startswith("scrypt$"):
+    if not local_demo_bypass_enabled() and (
+        is_example(settings.password_hash) or not settings.password_hash.startswith("scrypt$")
+    ):
         errors.append("ADMIN_PASSWORD_HASH must be an scrypt hash")
-    if len(settings.session_secret) < 32 or is_example(settings.session_secret):
+    if not local_demo_bypass_enabled() and (
+        len(settings.session_secret) < 32 or is_example(settings.session_secret)
+    ):
         errors.append("SESSION_SIGNING_SECRET must be a random value of at least 32 characters")
     if not settings.frontend_origins or "*" in settings.frontend_origins:
         errors.append("CORS_ALLOWED_ORIGINS must list explicit HTTPS frontend origins")
@@ -151,6 +167,8 @@ def clear_login_attempts(request: Request) -> None:
 
 
 async def require_admin(request: Request) -> None:
+    if local_demo_bypass_enabled():
+        return
     settings = security_settings()
     if not valid_session(request.cookies.get(COOKIE_NAME), settings.session_secret):
         raise HTTPException(status_code=401, detail="Owner authentication required")

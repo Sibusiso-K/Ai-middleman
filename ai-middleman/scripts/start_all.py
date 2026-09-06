@@ -32,6 +32,7 @@ API_HEALTH_URL = f"http://localhost:{API_PORT}/health"
 NGROK_DOMAIN = os.getenv("NGROK_DOMAIN", "plating-marmalade-outthink.ngrok-free.dev")
 TUNNEL_HEALTH_URL = f"https://{NGROK_DOMAIN}/health"
 NGROK_BYPASS_HEADERS = {"ngrok-skip-browser-warning": "true"}
+LOCAL_DEMO_BYPASS = os.getenv("LOCAL_DEMO_BYPASS_AUTH", "").strip().lower() in {"1", "true", "yes"}
 
 POLL_INTERVAL_SECONDS = 1.0
 POLL_TIMEOUT_SECONDS = 30
@@ -155,6 +156,26 @@ def start_api() -> bool:
         _ok(f"already healthy at {API_HEALTH_URL}")
         return True
 
+    # The server normally runs in a detached console.  Validate settings in
+    # this foreground process first so an incomplete local .env yields an
+    # actionable error rather than a generic health-check timeout.
+    preflight = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from app.security import validate_production_configuration; validate_production_configuration()",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if preflight.returncode != 0:
+        detail = (preflight.stderr or preflight.stdout).strip().splitlines()[-1]
+        print(f"  [FAIL] API security configuration: {detail}")
+        print("  For local development, set APP_ENV=development and ALLOW_INSECURE_LOCAL_AUTH=true,")
+        print("  then run: python scripts/create_owner_credentials.py")
+        return False
+
     print("  Starting uvicorn ...")
     subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "app.main:app", "--port", str(API_PORT)],
@@ -165,6 +186,9 @@ def start_api() -> bool:
 
 def start_tunnel() -> bool:
     print("3. ngrok tunnel")
+    if LOCAL_DEMO_BYPASS:
+        print("  [SKIP] Local demo auth bypass is active; public tunnel is disabled.")
+        return True
     if _already_healthy(TUNNEL_HEALTH_URL, headers=NGROK_BYPASS_HEADERS):
         _ok(f"already healthy at {TUNNEL_HEALTH_URL}")
         return True
@@ -189,9 +213,10 @@ def main() -> None:
     print()
     print("=" * 60)
     if db_ok and api_ok and tunnel_ok:
-        print("ALL SYSTEMS GO")
+        print("LOCAL DEMO READY" if LOCAL_DEMO_BYPASS else "ALL SYSTEMS GO")
         print(f"  API:      http://localhost:{API_PORT}")
-        print(f"  Tunnel:   https://{NGROK_DOMAIN}")
+        if not LOCAL_DEMO_BYPASS:
+            print(f"  Tunnel:   https://{NGROK_DOMAIN}")
         print("  Now start the frontend separately: cd frontend && npm run dev")
     else:
         print("NOT READY — see [FAIL] / TIMED OUT messages above")
