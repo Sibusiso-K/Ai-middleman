@@ -6,7 +6,6 @@ It is safe to re-run because the importer keys records by ``contact_id``.
 """
 
 import asyncio
-import sys
 
 from start_all import start_database
 

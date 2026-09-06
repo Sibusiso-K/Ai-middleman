@@ -155,25 +155,30 @@ cp .env.example .env
 # Edit .env with your actual values
 ```
 
-### 3. Start the database
+### 3. Create and seed the local database
 
 ```bash
-docker compose up -d
+python scripts/bootstrap_local_db.py
 ```
 
-### 4. Generate and import contact data
+This creates the Compose PostgreSQL service, applies all migrations, and
+imports the checked-in CSV. It is safe to re-run: existing `contact_id` values
+are skipped. A Docker Hub account transfer is not required; Docker Compose
+creates a local volume on the current machine.
+
+### 4. Use a different contact CSV (optional)
 
 ```bash
-# Generate synthetic contacts (or replace with your real CSV)
+# Generate synthetic contacts or replace data/contacts.csv with an approved CSV.
 python generate_contacts.py
 
-# Import to PostgreSQL
+# Re-run the idempotent importer.
 python data/import_contacts.py
 ```
 
 Verify:
 ```bash
-docker exec -it ai-middleman-db-1 psql -U postgres -d aimiddleman -c "SELECT COUNT(*) FROM contacts;"
+docker compose exec db psql -U postgres -d aimiddleman -c "SELECT COUNT(*) FROM contacts;"
 # Expected: 50000
 ```
 
