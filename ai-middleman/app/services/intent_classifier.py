@@ -20,7 +20,7 @@ import re
 from dotenv import load_dotenv
 from pathlib import Path
 
-from app.services.llm_provider import get_chat_configs
+from app.services.llm_provider import get_chat_configs, chat_payload, completion_text
 from app.services.llm_json import extract_json
 from app.services.sa_languages import SA_LANGUAGES
 from app.log_safe import slog
@@ -176,12 +176,7 @@ If no specific person is named for a request, set named_contact to null."""
 
         last_error = None
         for config in self.configs:
-            payload = {
-                "model": config["model"],
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.1,
-                "max_tokens": 300,
-            }
+            payload = chat_payload(config, [{"role": "user", "content": prompt}], temperature=0.1, max_tokens=300, json_object=True)
             headers = {
                 "Authorization": f"Bearer {config['api_key']}",
                 "Content-Type": "application/json",
@@ -194,9 +189,11 @@ If no specific person is named for a request, set named_contact to null."""
                             config["api_url"], headers=headers, json=payload, timeout=self._timeout_for(config)
                         )
                     if response.status_code == 200:
-                        content = response.json()["choices"][0]["message"]["content"]
+                        content = completion_text(response)
                         try:
                             data = extract_json(content)
+                            if not all(isinstance(data.get(field), bool) for field in ("is_request", "is_update")):
+                                raise ValueError("Intent flags must be JSON booleans, not strings or missing values")
                             detected_language = data.get("language") or "English"
                             if detected_language not in SA_LANGUAGES:
                                 # Defensive fallback: despite the prompt constraining the
@@ -268,7 +265,7 @@ If no specific person is named for a request, set named_contact to null."""
                         slog(f"[Intent/{config['name']}] API error {response.status_code} (attempt {attempt}/{self.max_attempts})")
                         if response.status_code < 500 and response.status_code != 429:
                             break
-                except (httpx.TimeoutException, httpx.TransportError) as e:
+                except (httpx.TimeoutException, httpx.TransportError, ValueError) as e:
                     last_error = f"{type(e).__name__}: {e!r}"
                     slog(f"[Intent/{config['name']}] transient error (attempt {attempt}/{self.max_attempts}): {last_error}")
 

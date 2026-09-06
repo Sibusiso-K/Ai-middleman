@@ -16,10 +16,16 @@ dropping a voice note/image.
 """
 
 import base64
-import os
 import httpx
 from dotenv import load_dotenv
 from pathlib import Path
+from app.services.llm_provider import (
+    configured_key,
+    groq_model,
+    setting,
+    chat_payload,
+    completion_text,
+)
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
@@ -30,8 +36,18 @@ class MediaTranscriptionError(Exception):
     """Raised when a voice note/image could not be transcribed or described."""
 
 
+async def _post(url: str, **kwargs) -> httpx.Response:
+    try:
+        async with httpx.AsyncClient() as client:
+            return await client.post(url, **kwargs)
+    except httpx.HTTPError as exc:
+        raise MediaTranscriptionError(
+            "Media service could not be reached; please retry or type the message."
+        ) from exc
+
+
 def _require_key() -> str:
-    key = os.getenv("GROQ_API_KEY")
+    key = configured_key("GROQ_API_KEY")
     if not key:
         raise MediaTranscriptionError(
             "GROQ_API_KEY is not set — voice/image transcription needs a free "
@@ -52,18 +68,23 @@ async def transcribe_audio(audio_bytes: bytes, filename: str = "voice.ogg") -> s
     siSwati, and Sepedi/Setswana — a training-data limitation of every open
     transcription model, not something fixable in this code."""
     api_key = _require_key()
-    model = os.getenv("GROQ_WHISPER_MODEL", "whisper-large-v3-turbo")
+    model = setting("GROQ_WHISPER_MODEL", "whisper-large-v3-turbo")
 
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            f"{GROQ_BASE}/audio/transcriptions",
-            headers={"Authorization": f"Bearer {api_key}"},
-            files={"file": (filename, audio_bytes)},
-            data={"model": model, "response_format": "text"},
-            timeout=60.0,
-        )
+    response = await _post(
+        f"{GROQ_BASE}/audio/transcriptions",
+        headers={"Authorization": f"Bearer {api_key}"},
+        files={"file": (filename, audio_bytes)},
+        data={"model": model, "response_format": "text"},
+        timeout=60.0,
+    )
     if response.status_code != 200:
-        raise MediaTranscriptionError(f"Groq transcription failed: {response.status_code} {response.text[:300]}")
+        raise MediaTranscriptionError(
+            f"Groq transcription failed (HTTP {response.status_code}); please retry or type the message."
+        )
+    if not response.text.strip():
+        raise MediaTranscriptionError(
+            "Groq returned an empty transcription; please retry or type the message."
+        )
     return response.text.strip()
 
 
@@ -82,7 +103,7 @@ async def describe_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> s
     language downstream the same way it would for a typed message.
     """
     api_key = _require_key()
-    model = os.getenv("GROQ_VISION_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
+    model = groq_model(vision=True)
 
     b64 = base64.b64encode(image_bytes).decode("ascii")
     data_url = f"data:{mime_type};base64,{b64}"
@@ -95,24 +116,35 @@ async def describe_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> s
         "treated as if the sender had typed it as a WhatsApp message."
     )
 
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            f"{GROQ_BASE}/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
-                "model": model,
-                "messages": [{
+    response = await _post(
+        f"{GROQ_BASE}/chat/completions",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json=chat_payload(
+            {"name": "groq", "model": model},
+            [
+                {
                     "role": "user",
                     "content": [
                         {"type": "text", "text": prompt},
                         {"type": "image_url", "image_url": {"url": data_url}},
                     ],
-                }],
-                "max_tokens": 300,
-                "temperature": 0.2,
-            },
-            timeout=45.0,
-        )
+                }
+            ],
+            max_tokens=500,
+            temperature=0.2,
+        ),
+        timeout=45.0,
+    )
     if response.status_code != 200:
-        raise MediaTranscriptionError(f"Groq vision failed: {response.status_code} {response.text[:300]}")
-    return response.json()["choices"][0]["message"]["content"].strip()
+        raise MediaTranscriptionError(
+            f"Groq vision failed (HTTP {response.status_code}); please retry or type the message."
+        )
+    try:
+        return completion_text(response)
+    except ValueError as exc:
+        raise MediaTranscriptionError(
+            "Groq returned no usable image description; please retry or type the message."
+        ) from exc

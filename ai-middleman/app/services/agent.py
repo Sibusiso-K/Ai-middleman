@@ -2,7 +2,7 @@
 agent.py — Stage 2 of the two-stage matching pipeline.
 
 Sends the keyword filter's candidates (up to CANDIDATE_LIMIT, currently 12) to
-an LLM (Groq's Llama 3.1 8B, with a Featherless fallback) for intelligent
+an LLM (Groq's GPT-OSS 20B, with a Featherless fallback) for intelligent
 ranking. The LLM evaluates each candidate against the user's query using strict
 scoring rules and returns ranked matches with confidence scores and
 human-readable reasoning.
@@ -15,11 +15,12 @@ import os
 import json
 import re
 import asyncio
+import math
 from typing import Dict, Any, List
 from dotenv import load_dotenv
 from pathlib import Path
 
-from app.services.llm_provider import get_chat_configs
+from app.services.llm_provider import get_chat_configs, chat_payload, completion_text
 from app.services.llm_json import extract_json
 from app.log_safe import slog
 
@@ -142,17 +143,12 @@ class LLMAgent:
                                 "Authorization": f"Bearer {config['api_key']}",
                                 "Content-Type": "application/json"
                             },
-                            json={
-                                "model": config["model"],
-                                "messages": [{"role": "user", "content": prompt}],
-                                "max_tokens": 1024,
-                                "temperature": 0.1
-                            },
+                            json=chat_payload(config, [{"role": "user", "content": prompt}], max_tokens=1024, temperature=0.1, json_object=True),
                             timeout=self._timeout_for(config)
                         )
 
                     if response.status_code == 200:
-                        content = response.json()["choices"][0]["message"]["content"]
+                        content = completion_text(response)
                         try:
                             return self._reconcile_matches(extract_json(content), candidates, query)
                         except json.JSONDecodeError as e:
@@ -170,7 +166,7 @@ class LLMAgent:
                         slog(f"[Agent/{config['name']}] non-retryable HTTP {response.status_code}: {response.text[:200]}")
                         break  # try the next provider, if any, rather than giving up outright
 
-                except (httpx.TimeoutException, httpx.TransportError) as e:
+                except (httpx.TimeoutException, httpx.TransportError, ValueError) as e:
                     slog(f"[Agent/{config['name']}] transient error (attempt {attempt}/{self.max_retries}): {type(e).__name__}: {e!r}")
 
                 if attempt < self.max_retries:
@@ -200,12 +196,25 @@ class LLMAgent:
         )
         wants_clevel = bool(_CLEVEL_QUERY_RE.search(query or ""))
         cleaned = []
-        for m in parsed.get("matches", []) or []:
+        matches = parsed.get("matches", [])
+        if not isinstance(matches, list):
+            raise ValueError("LLM matches must be an array")
+        for m in matches:
+            if not isinstance(m, dict):
+                raise ValueError("Each LLM match must be an object")
+            confidence = m.get("confidence")
+            if (isinstance(confidence, bool) or not isinstance(confidence, (int, float))
+                    or not math.isfinite(confidence) or not 0 <= confidence <= 1):
+                raise ValueError("LLM confidence must be a finite number in [0, 1]")
+            if not isinstance(m.get("reasoning", ""), str):
+                raise ValueError("LLM reasoning must be text")
             cid = m.get("contact_id")
+            if isinstance(cid, bool) or not isinstance(cid, (int, str)):
+                raise ValueError("LLM contact_id must be an integer identifier")
             try:
                 cid = int(cid)
-            except (TypeError, ValueError):
-                pass
+            except (TypeError, ValueError) as exc:
+                raise ValueError("LLM contact_id must be an integer identifier") from exc
             c = by_id.get(cid)
             if not c:
                 slog(f"[Agent] dropping match with unknown contact_id={m.get('contact_id')!r} (name claimed: {m.get('name')!r})")

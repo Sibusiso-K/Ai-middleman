@@ -1,99 +1,157 @@
-"""
-llm_provider.py — Picks which chat-completions provider the LLM-calling
-services (intent_classifier, agent, draft_generator) should use.
+"""Provider credentials and model-specific chat contracts.
 
-Groq, Featherless, and HuggingFace's Inference Providers router all expose an
-OpenAI-compatible /v1/chat/completions endpoint (same request/response shape),
-so switching/adding providers is just a matter of pointing at a different
-URL/key/model — no per-service code changes needed. Groq is preferred when
-GROQ_API_KEY is set (much faster inference on the free tier); Featherless is
-the second fallback; HuggingFace (Qwen3-8B via the nscale provider, routed
-through router.huggingface.co) is a third, last-resort fallback — added as a
-demo-day safety net, not a sustainable everyday provider: HF's free tier is
-only $0.10/month of routed-request credit shared across every provider it
-proxies to, so it's meant to absorb a handful of calls when both Groq and
-Featherless are degraded, not carry real production traffic.
+Defaults checked 2026-09-06. Support is not account entitlement: run
+scripts/check_llm.py with configured keys. See MODEL-MIGRATION.md.
 """
 
+import logging
 import os
-from dotenv import load_dotenv
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
+logger = logging.getLogger(__name__)
+GROQ_CHAT_MODEL = "openai/gpt-oss-20b"
+GROQ_VISION_MODEL = "qwen/qwen3.6-27b"
 
 
-def _groq_config() -> dict:
-    return {
-        "name": "groq",
-        "api_key": os.getenv("GROQ_API_KEY"),
-        "api_url": os.getenv("GROQ_API_URL", "https://api.groq.com/openai/v1/chat/completions"),
-        "model": os.getenv("GROQ_MODEL", "llama-3.1-8b-instant"),
+def setting(name: str, default: str = "") -> str:
+    """Blank .env entries should not override working defaults."""
+    return os.getenv(name, "").strip() or default
+
+
+def configured_key(name: str) -> str:
+    value = setting(name)
+    if value.lower().startswith("your_") or value.lower() in {"changeme", "replace_me"}:
+        return ""
+    return value
+
+
+def groq_model(*, vision: bool = False) -> str:
+    name = "GROQ_VISION_MODEL" if vision else "GROQ_MODEL"
+    model = setting(name, GROQ_VISION_MODEL if vision else GROQ_CHAT_MODEL)
+    replacements = {
+        "llama-3.1-8b-instant": GROQ_CHAT_MODEL,
+        "llama-3.3-70b-versatile": "openai/gpt-oss-120b",
+        "qwen/qwen3-32b": "openai/gpt-oss-120b",
+        "meta-llama/llama-4-scout-17b-16e-instruct": GROQ_VISION_MODEL,
+        "meta-llama/llama-4-maverick-17b-128e-instruct": GROQ_VISION_MODEL,
     }
-
-
-def _featherless_config() -> dict:
-    return {
-        "name": "featherless",
-        "api_key": os.getenv("FEATHERLESS_API_KEY") or os.getenv("OPENROUTER_API_KEY"),
-        "api_url": os.getenv("FEATHERLESS_API_URL", "https://api.featherless.ai/v1/chat/completions"),
-        "model": os.getenv("FEATHERLESS_MODEL", "NousResearch/Meta-Llama-3.1-8B-Instruct"),
-    }
-
-
-def _huggingface_config() -> dict:
-    # Third, last-resort fallback via HF's Inference Providers router. Default
-    # model pins the nscale provider explicitly (":nscale" suffix) rather than
-    # ":fastest"/":auto", so behaviour doesn't silently change if HF re-routes
-    # to a different backend later.
-    #
-    # Deliberately NOT Qwen3-8B: tested and confirmed it defaults to "thinking
-    # mode" — it burns the token budget on a hidden reasoning_content field and
-    # returns message.content = null unless the prompt is rewritten with a
-    # "/no_think" directive per-call. That would mean special-casing the
-    # prompt text for one provider across all three call sites (agent.py,
-    # intent_classifier.py, draft_generator.py), which all currently assume
-    # one universal prompt string works for every provider. Llama-3.1-8B-
-    # Instruct via nscale was tested and returns clean, non-thinking JSON
-    # content with the exact same prompts already in use — safer, zero-touch
-    # drop-in given how close this was added to the demo.
-    return {
-        "name": "huggingface",
-        "api_key": os.getenv("HUGGINGFACE_API_KEY"),
-        "api_url": os.getenv("HUGGINGFACE_API_URL", "https://router.huggingface.co/v1/chat/completions"),
-        "model": os.getenv("HUGGINGFACE_MODEL", "meta-llama/Llama-3.1-8B-Instruct:nscale"),
-    }
-
-
-def get_chat_config() -> dict:
-    """Returns {"api_key", "api_url", "model"} for whichever provider is active."""
-    return _groq_config() if os.getenv("GROQ_API_KEY") else _featherless_config()
+    if model in replacements:
+        replacement = replacements[model]
+        logger.warning(
+            "%s uses retired model %s; migrating to %s", name, model, replacement
+        )
+        model = replacement
+    return model
 
 
 def get_chat_configs(include_huggingface: bool = True) -> list[dict]:
-    """Returns an ordered list of provider configs to try: Groq first (fast)
-    when configured, Featherless second if Groq's free-tier rate limit is
-    exhausted, and HuggingFace (Llama-3.1-8B-Instruct via nscale) last if that
-    key is set and include_huggingface is True — a small safety net for when
-    BOTH of the above are degraded at once, not a provider meant to carry
-    sustained traffic (see module docstring).
+    """Only configured providers, in order; never borrow another vendor's key.
 
-    include_huggingface defaults to True but agent.py (Stage 2 matching)
-    explicitly passes False: tested against the real multi-candidate matching
-    prompt, this HF fallback only reached valid JSON on roughly 1 of 3 calls
-    (it frequently narrates prose analysis and never emits the JSON at all,
-    even with a larger max_tokens budget) — unreliable for the one call site
-    where correctness matters most. It tested reliably clean for the simpler
-    intent-classification and draft-generation prompts, so it stays enabled
-    there."""
+    HF stays out of ranking pending re-evaluation of multi-candidate output.
+    No configuration means no requests, not a request with Bearer None.
+    """
+    providers = [
+        ("groq", "GROQ", "https://api.groq.com/openai/v1/chat/completions", None),
+        (
+            "featherless",
+            "FEATHERLESS",
+            "https://api.featherless.ai/v1/chat/completions",
+            "meta-llama/Llama-3.1-8B-Instruct",
+        ),
+        (
+            "openrouter",
+            "OPENROUTER",
+            "https://openrouter.ai/api/v1/chat/completions",
+            "meta-llama/llama-3.1-8b-instruct",
+        ),
+    ]
+    if include_huggingface:
+        providers.append(
+            (
+                "huggingface",
+                "HUGGINGFACE",
+                "https://router.huggingface.co/v1/chat/completions",
+                "meta-llama/Llama-3.1-8B-Instruct:nscale",
+            )
+        )
     configs = []
-    if os.getenv("GROQ_API_KEY"):
-        configs.append(_groq_config())
-    if os.getenv("FEATHERLESS_API_KEY") or os.getenv("OPENROUTER_API_KEY"):
-        configs.append(_featherless_config())
-    if include_huggingface and os.getenv("HUGGINGFACE_API_KEY"):
-        configs.append(_huggingface_config())
-    return configs or [get_chat_config()]
+    for name, prefix, url, default in providers:
+        key = configured_key(f"{prefix}_API_KEY")
+        if not key:
+            continue
+        model = groq_model() if name == "groq" else setting(f"{prefix}_MODEL", default)
+        if name == "featherless" and model == "NousResearch/Meta-Llama-3.1-8B-Instruct":
+            logger.warning("Replacing old Featherless model alias with %s", default)
+            model = default
+        configs.append(
+            {
+                "name": name,
+                "api_key": key,
+                "api_url": setting(f"{prefix}_API_URL", url),
+                "model": model,
+            }
+        )
+    return configs
+
+
+def get_chat_config() -> dict:
+    configs = get_chat_configs()
+    if not configs:
+        raise ValueError("No LLM provider configured; set a provider API key in .env")
+    return configs[0]
 
 
 def using_groq() -> bool:
-    return bool(os.getenv("GROQ_API_KEY"))
+    return bool(configured_key("GROQ_API_KEY"))
+
+
+def chat_payload(
+    config: dict,
+    messages: list,
+    *,
+    max_tokens: int,
+    temperature: float,
+    json_object: bool = False,
+) -> dict:
+    """Budget for reasoning + final text; never display reasoning as a draft.
+
+    Hiding reasoning does not disable it. The old 160-300 token budgets could
+    run out before the final answer. Provider-specific fields stay on Groq.
+    """
+    payload = {
+        "model": config["model"],
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    if config["name"] == "groq":
+        payload["max_completion_tokens"] = payload.pop("max_tokens")
+        if config["model"] in {"openai/gpt-oss-20b", "openai/gpt-oss-120b"}:
+            payload.update(reasoning_effort="low", include_reasoning=False)
+            payload["max_completion_tokens"] = max(2048, max_tokens + 1024)
+        elif config["model"] in {"qwen/qwen3.6-27b", "qwen/qwen3.8-27b"}:
+            payload.update(reasoning_effort="none", reasoning_format="hidden")
+        if json_object:
+            payload["response_format"] = {"type": "json_object"}
+    return payload
+
+
+def completion_text(response) -> str:
+    """Reject unusable 200 replies so retry/fallback runs, without logging PII."""
+    try:
+        choice = response.json()["choices"][0]
+        content = choice["message"]["content"]
+        if choice.get("finish_reason") in {"length", "content_filter", "tool_calls"}:
+            raise ValueError("LLM did not finish a usable answer")
+        if (
+            not isinstance(content, str)
+            or not content.strip()
+            or "<think>" in content.lower()
+        ):
+            raise ValueError("LLM returned no usable final text")
+        return content.strip()
+    except (KeyError, IndexError, TypeError) as exc:
+        raise ValueError("Malformed LLM response envelope") from exc

@@ -13,7 +13,7 @@ from typing import List, Dict, Any
 from dotenv import load_dotenv
 from pathlib import Path
 
-from app.services.llm_provider import get_chat_configs
+from app.services.llm_provider import get_chat_configs, chat_payload, completion_text
 from app.log_safe import slog
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
@@ -163,12 +163,7 @@ Sound genuine, personal, and confident."""
                 "Authorization": f"Bearer {config['api_key']}",
                 "Content-Type": "application/json",
             }
-            json_payload = {
-                "model": config["model"],
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.7,
-                "max_tokens": 200,
-            }
+            json_payload = chat_payload(config, [{"role": "user", "content": prompt}], temperature=0.7, max_tokens=200, json_object=False)
 
             for attempt in range(1, self.max_attempts + 1):
                 try:
@@ -177,7 +172,7 @@ Sound genuine, personal, and confident."""
                             config["api_url"], headers=headers, json=json_payload, timeout=self._timeout_for(config)
                         )
                     if response.status_code == 200:
-                        draft = response.json()["choices"][0]["message"]["content"].strip()
+                        draft = completion_text(response)
                         draft = _strip_wrapping_quotes(draft)
                         slog(f"[Draft/{config['name']}] Generated (attempt {attempt}): {draft[:100]}...")
                         return draft
@@ -190,7 +185,7 @@ Sound genuine, personal, and confident."""
                     slog(f"[Draft/{config['name']}] API error {response.status_code} (attempt {attempt}/{self.max_attempts})")
                     if response.status_code < 500 and response.status_code != 429:
                         break
-                except (httpx.TimeoutException, httpx.TransportError) as e:
+                except (httpx.TimeoutException, httpx.TransportError, ValueError) as e:
                     slog(f"[Draft/{config['name']}] transient error (attempt {attempt}/{self.max_attempts}): {type(e).__name__}: {e!r}")
 
                 if attempt < self.max_attempts:
@@ -199,7 +194,7 @@ Sound genuine, personal, and confident."""
         # All providers exhausted — return a graceful, natural fallback so Alex
         # still gets something to send rather than an error.
         slog("[Draft] all providers exhausted — returning fallback line")
-        return "Hey! I've got some great people in mind for this — let me get back to you shortly 🤝"
+        return "I'm having trouble checking this right now — let me get back to you shortly."
 
     async def generate_details_draft(
         self,
@@ -301,12 +296,7 @@ Write Alex's reply now. Include ALL the details above verbatim. 1-3 sentences. R
                 "Authorization": f"Bearer {config['api_key']}",
                 "Content-Type": "application/json",
             }
-            json_payload = {
-                "model": config["model"],
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.85,
-                "max_tokens": 160,
-            }
+            json_payload = chat_payload(config, [{"role": "user", "content": prompt}], temperature=0.85, max_tokens=160, json_object=False)
             for attempt in range(1, self.max_attempts + 1):
                 try:
                     async with httpx.AsyncClient() as client:
@@ -315,7 +305,7 @@ Write Alex's reply now. Include ALL the details above verbatim. 1-3 sentences. R
                             timeout=self._timeout_for(config),
                         )
                     if response.status_code == 200:
-                        draft = response.json()["choices"][0]["message"]["content"].strip()
+                        draft = completion_text(response)
                         draft = _strip_wrapping_quotes(draft)
                         slog(f"[Details/{config['name']}] Generated: {draft[:100]}...")
                         return draft
@@ -325,7 +315,7 @@ Write Alex's reply now. Include ALL the details above verbatim. 1-3 sentences. R
                     slog(f"[Details/{config['name']}] error {response.status_code} (attempt {attempt})")
                     if response.status_code < 500 and response.status_code != 429:
                         break
-                except (httpx.TimeoutException, httpx.TransportError) as e:
+                except (httpx.TimeoutException, httpx.TransportError, ValueError) as e:
                     slog(f"[Details/{config['name']}] transient error attempt {attempt}: {type(e).__name__}")
                 if attempt < self.max_attempts:
                     await asyncio.sleep(self._backoff_for(config) * attempt)

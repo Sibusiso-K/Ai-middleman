@@ -23,7 +23,7 @@ replies Alex sends back (which arrive via the webhook as alex_reply / draft_*).
 import asyncio
 import os
 import re
-from fastapi import APIRouter, Request, BackgroundTasks, UploadFile, File
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, UploadFile
 from dotenv import load_dotenv
 from pathlib import Path
 
@@ -35,10 +35,11 @@ from app.services.whatsapp_client import WhatsAppClient
 from app.services.contact_lookup import resolve_contact_by_name
 from app.services.pipeline_events import emit
 from app.log_safe import slog
+from app.security import require_admin, security_settings
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_admin)])
 
 ALEX_NUMBER = os.getenv("ALEX_WHATSAPP_NUMBER", "27736013348")
 FRIEND_NAME = os.getenv("FRIEND_SIM_NAME", "Sam")
@@ -835,6 +836,8 @@ async def friend_send(request: Request, background: BackgroundTasks):
     db_pool = request.app.state.db_pool
     body = await request.json()
     text = (body.get("text") or "").strip()
+    if len(text) > 4_000:
+        raise HTTPException(status_code=413, detail="Message is too large")
     if not text:
         return {"error": "text is required"}
     return await _queue_sam_text(db_pool, background, text)
@@ -851,18 +854,27 @@ async def friend_send_media(request: Request, background: BackgroundTasks, file:
     from app.services.groq_media import transcribe_audio, describe_image, MediaTranscriptionError
 
     db_pool = request.app.state.db_pool
-    content = await file.read()
+    content = await file.read(security_settings().max_request_bytes + 1)
+    if len(content) > security_settings().max_request_bytes:
+        raise HTTPException(status_code=413, detail="Upload is too large")
     content_type = (file.content_type or "").lower()
 
     try:
-        if content_type.startswith("audio"):
+        if content_type in {"audio/ogg", "audio/opus", "audio/webm", "audio/mpeg", "audio/wav"}:
             transcript = await transcribe_audio(content, filename=file.filename or "voice.webm")
             text = f"🎙️ {transcript}"
-        elif content_type.startswith("image"):
+        elif content_type in {"image/jpeg", "image/png", "image/webp"}:
+            image_signatures = {
+                "image/jpeg": b"\xff\xd8\xff",
+                "image/png": b"\x89PNG\r\n\x1a\n",
+                "image/webp": b"RIFF",
+            }
+            if not content.startswith(image_signatures[content_type]):
+                raise HTTPException(status_code=415, detail="Upload bytes do not match the declared image type")
             description = await describe_image(content, mime_type=content_type)
             text = f"🖼️ {description}"
         else:
-            return {"error": f"Unsupported content type: {content_type}"}
+            raise HTTPException(status_code=415, detail="Unsupported media type")
     except MediaTranscriptionError as e:
         return {"error": str(e)}
 

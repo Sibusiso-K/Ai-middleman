@@ -33,7 +33,10 @@ def extract_json(content: str) -> Dict[str, Any]:
     for candidate in candidates:
         for variant in (candidate, _strip_trailing_commas(candidate)):
             try:
-                return json.loads(variant)
+                parsed = json.loads(variant)
+                if not isinstance(parsed, dict):
+                    raise ValueError("Expected a JSON object from the LLM")
+                return parsed
             except json.JSONDecodeError as e:
                 last_error = e
     raise last_error

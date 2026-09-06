@@ -10,12 +10,13 @@ directly from the dashboard rather than only via the seed data.
 """
 
 import json
-from fastapi import APIRouter, Request, Query, HTTPException
+from fastapi import APIRouter, Depends, Request, Query, HTTPException
 from typing import Optional
 
 from app.models.schemas import ContactWrite
+from app.security import require_admin
 
-router = APIRouter(prefix="/api")
+router = APIRouter(prefix="/api", dependencies=[Depends(require_admin)])
 
 
 @router.get("/analytics/sectors")

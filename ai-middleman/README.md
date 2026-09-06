@@ -1,5 +1,11 @@
 # AI Middleman — WhatsApp Contact Matching System
 
+Current model defaults and rollout instructions:
+[MODEL-MIGRATION.md](MODEL-MIGRATION.md) (6 September 2026). Old Llama results
+and cost estimates in this historical guide do not establish replacement-model
+accuracy or current operating cost. A real WhatsApp signing secret is now
+required: invalid signatures are rejected, not accepted for debugging.
+
 > Automating business connections through intelligent AI matching.
 
 A WhatsApp bot that reads natural-language contact requests, matches them against a 50,000-contact database using a two-stage AI pipeline, drafts a reply in the account owner's own voice — and then waits for his real approval (Send / Edit / Skip) before anything reaches the requester. Replies in English and Afrikaans (see [Language scope](#language-scope)), with a React dashboard for live-pipeline visualization and analytics.
@@ -135,7 +141,7 @@ ai-middleman/
 
 ```bash
 git clone https://github.com/Sibusiso-K/Ai-middleman.git
-cd Ai-middleman
+cd Ai-middleman/ai-middleman
 python -m venv venv
 venv\Scripts\activate        # Windows
 # source venv/bin/activate   # Mac/Linux
@@ -291,7 +297,9 @@ Free-tier LLM APIs are the main scaling constraint today — a paid tier or self
 
 ```bash
 pip install pytest pytest-asyncio
-pytest tests/test_matching.py -v      # Unit tests: tokenization, response formatting
+python -m pytest tests/ -v           # All unit and mocked provider/security tests
+python scripts/check_llm.py          # Configured model catalogues, no inference
+python scripts/check_llm.py --probe  # Small synthetic text calls; may consume credits
 python scripts/test_migrations.py     # Spins up a scratch DB, verifies schema shape
 python scripts/run_eval.py            # Labeled intent/matching accuracy (needs the API running)
 ```
