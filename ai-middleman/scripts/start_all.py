@@ -44,6 +44,31 @@ def _ok(msg: str) -> None:
     print(f"  [OK] {msg}")
 
 
+def _docker_cli() -> str | None:
+    """Return Docker's CLI even before a freshly installed Desktop updates PATH."""
+    on_path = shutil.which("docker")
+    if on_path:
+        return on_path
+
+    candidates = (
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs/DockerDesktop/resources/bin/docker.exe",
+        Path("C:/Program Files/Docker/Docker/resources/bin/docker.exe"),
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
+def _docker_environment(docker: str) -> dict[str, str]:
+    """Expose Docker Desktop's credential helper beside a non-PATH CLI."""
+    environment = os.environ.copy()
+    helper_directory = str(Path(docker).parent)
+    current_path = environment.get("PATH", "")
+    environment["PATH"] = helper_directory if not current_path else f"{helper_directory}{os.pathsep}{current_path}"
+    return environment
+
+
 def _already_healthy(url: str, headers: dict | None = None, attempts: int = 3) -> bool:
     """A single flaky check here is dangerous, not just wrong: if it
     falsely reports "not running" for the tunnel, we'd launch a second
@@ -79,8 +104,9 @@ def _wait_healthy(label: str, url: str, headers: dict | None = None) -> bool:
 
 def start_database() -> bool:
     print("1. Database (Docker Postgres)")
-    if shutil.which("docker") is None:
-        print("  [FAIL] Docker CLI was not found on PATH.")
+    docker = _docker_cli()
+    if docker is None:
+        print("  [FAIL] Docker CLI was not found.")
         print("  Install/start Docker Desktop, then open a new terminal and run this command again.")
         return False
 
@@ -90,10 +116,11 @@ def start_database() -> bool:
     # creates the service and its local volume on a new Docker installation.
     print("  Creating or starting the Compose db service ...")
     started = subprocess.run(
-        ["docker", "compose", "up", "-d", "db"],
+        [docker, "compose", "up", "-d", "db"],
         cwd=ROOT,
         capture_output=True,
         text=True,
+        env=_docker_environment(docker),
     )
     if started.returncode != 0:
         detail = (started.stderr or started.stdout).strip()
@@ -104,10 +131,11 @@ def start_database() -> bool:
     deadline = time.time() + POLL_TIMEOUT_SECONDS
     while time.time() < deadline:
         ready = subprocess.run(
-            ["docker", "compose", "exec", "-T", "db", "pg_isready", "-U", "postgres", "-d", "aimiddleman"],
+            [docker, "compose", "exec", "-T", "db", "pg_isready", "-U", "postgres", "-d", "aimiddleman"],
             cwd=ROOT,
             capture_output=True,
             text=True,
+            env=_docker_environment(docker),
         )
         if ready.returncode == 0:
             print(" up")

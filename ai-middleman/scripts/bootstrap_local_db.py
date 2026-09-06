@@ -6,8 +6,15 @@ It is safe to re-run because the importer keys records by ``contact_id``.
 """
 
 import asyncio
+import sys
+from pathlib import Path
 
 from start_all import start_database
+
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 
 async def bootstrap() -> None:
